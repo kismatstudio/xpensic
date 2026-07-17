@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Expense Tracker</title>
+    <script src="js/boot-theme.js"></script>
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/layout.css" />
+    <link rel="stylesheet" href="css/components.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <div class="app">
+      <header class="app-header" role="banner">
+        <button
+          class="icon-btn nav-toggle"
+          type="button"
+          aria-label="Open menu"
+          aria-controls="app-nav"
+          aria-expanded="false"
+        >
+          <span class="icon-btn__bars" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+        </button>
+
+        <a class="app-brand" href="#/dashboard" aria-label="Expense Tracker home">
+          <span class="app-brand__mark" aria-hidden="true">₹</span>
+          <span class="app-brand__name">Expense Tracker</span>
+        </a>
+
+        <div class="app-header__spacer"></div>
+
+        <div class="month-picker" role="group" aria-label="Selected month">
+          <button class="icon-btn" type="button" id="month-prev" aria-label="Previous month">
+            <span aria-hidden="true">&lsaquo;</span>
+          </button>
+          <span class="month-picker__label" id="month-label">July 2026</span>
+          <button class="icon-btn" type="button" id="month-next" aria-label="Next month">
+            <span aria-hidden="true">&rsaquo;</span>
+          </button>
+        </div>
+
+        <button
+          class="theme-toggle"
+          type="button"
+          id="theme-toggle"
+          aria-label="Toggle theme"
+          title="Toggle theme (light / dark / system)"
+        >
+          <span class="theme-toggle__icon" id="theme-icon" aria-hidden="true">◐</span>
+          <!-- The inner label is decorative — the rich aria-label on the
+               parent button (set from main.js) is the source of truth
+               for screen readers, so the visible "Light / Dark / System"
+               text is hidden from assistive tech to avoid double-reading. -->
+          <span id="theme-label" aria-hidden="true">System</span>
+        </button>
+      </header>
+
+      <div class="nav-scrim" id="nav-scrim" hidden></div>
+
+      <aside class="app-nav" id="app-nav" aria-label="Primary" aria-hidden="true">
+        <section class="app-nav__profile" id="app-nav-profile">
+          <!-- Profile section rendered by renderNavProfile() in main.js -->
+        </section>
+
+        <nav>
+          <ul class="nav-list" role="list">
+            <li><a class="nav-link nav-link--profile" href="#/dashboard" data-route="dashboard">
+              <span class="nav-link__label">Profile</span>
+            </a></li>
+            <li><a class="nav-link" href="#/dashboard" data-route="dashboard">
+              <span class="nav-link__label">Dashboard</span>
+            </a></li>
+            <li><a class="nav-link" href="#/expenses" data-route="expenses">
+              <span class="nav-link__label">Expenses</span>
+            </a></li>
+            <li><a class="nav-link" href="#/budgets" data-route="budgets">
+              <span class="nav-link__label">Budgets</span>
+            </a></li>
+            <li><a class="nav-link" href="#/categories" data-route="categories">
+              <span class="nav-link__label">Categories</span>
+            </a></li>
+            <li><a class="nav-link" href="#/settings" data-route="settings">
+              <span class="nav-link__label">Settings</span>
+            </a></li>
+          </ul>
+        </nav>
+
+        <div class="app-nav__footer">
+          <small class="muted">v1.0 &middot; phase 9 (polish)</small>
+        </div>
+      </aside>
+
+      <main class="app-main" id="main" tabindex="-1">
+        <section class="view" id="view" aria-live="polite">
+          <!-- Active view renders here -->
+        </section>
+      </main>
+
+      <div
+        class="toast-region"
+        id="toast-region"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

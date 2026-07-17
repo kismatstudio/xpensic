@@ -1,0 +1,27 @@
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+.npm/
+.yarn/
+
+# Runtime artifacts from the custom dev server (dev-server.cjs)
+dev-server.log
+dev-server.pid
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local debug scratch
+debug.cjs
+*.log.bak
+
+# Future build outputs (placeholder — we don't build yet)
+dist/
+build/

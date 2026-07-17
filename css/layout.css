@@ -1,0 +1,266 @@
+/* App shell layout */
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  background: var(--color-bg);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: var(--header-h) 1fr;
+  grid-template-areas:
+    "header"
+    "main";
+  min-height: 100dvh;
+}
+
+.app-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-header__spacer {
+  flex: 1;
+}
+
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.app-brand__mark {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-weight: 700;
+}
+
+.app-brand__name {
+  font-size: var(--text-md);
+}
+
+/* Hamburger icon — three thin horizontal bars */
+.icon-btn__bars {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 18px;
+  height: 14px;
+}
+.icon-btn__bars > span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+/* When the drawer is open, morph the bars into an "x". */
+.nav-toggle[aria-expanded="true"] .icon-btn__bars > span:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+.nav-toggle[aria-expanded="true"] .icon-btn__bars > span:nth-child(2) {
+  opacity: 0;
+}
+.nav-toggle[aria-expanded="true"] .icon-btn__bars > span:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
+/* Nav drawer — slides in from the left, overlays the app on every screen size */
+.app-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--nav-w);
+  max-width: 86vw;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  z-index: 50;
+  transform: translateX(-100%);
+  transition: transform 200ms ease;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.app-nav.is-open {
+  transform: translateX(0);
+}
+
+.app-nav__profile {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-1);
+}
+.app-nav__profile-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: background 120ms ease;
+}
+.app-nav__profile-link:hover {
+  background: var(--color-surface-2);
+}
+.app-nav__profile-link.is-active {
+  background: var(--color-primary-soft);
+}
+.app-nav__profile-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-surface-2);
+  flex: 0 0 auto;
+  object-fit: cover;
+}
+.app-nav__profile-id {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-nav__profile-name {
+  font-weight: 600;
+  font-size: var(--text-md);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-nav__profile-phone {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-link {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-weight: 500;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.nav-link:hover {
+  background: var(--color-surface-2);
+  color: var(--color-text);
+}
+
+.nav-link.is-active {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+/* The "Profile" item in the list mirrors the profile-chip and gets a
+   subtle outline so the user understands it leads to the same place. */
+.nav-link--profile {
+  display: none; /* Profile link is the chip; no need to duplicate in the list */
+}
+
+.app-nav__footer {
+  margin-top: auto;
+  color: var(--color-text-muted);
+}
+
+/* Scrim — dimmed overlay behind the drawer. Hidden by default. */
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 40;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.nav-scrim.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-main {
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.app-main:focus {
+  outline: none;
+}
+
+.view {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+.toast-region {
+  position: fixed;
+  inset: auto var(--space-4) var(--space-4) auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 100;
+  pointer-events: none;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+}
+
+.skip-link:focus {
+  left: var(--space-2);
+  top: var(--space-2);
+  z-index: 1000;
+}
+
+/* When the app is locked behind the login gate, hide the hamburger and
+   the rest of the shell so the user sees only the gate. */
+body.app-locked .app {
+  display: none;
+}
+
+/* Narrow screens: tighten the main padding. */
+@media (max-width: 720px) {
+  .app-main {
+    padding: var(--space-4);
+  }
+}

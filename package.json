@@ -1,0 +1,25 @@
+{
+  "name": "expense-tracker",
+  "version": "1.0.0",
+  "description": "Lightweight, single-user expense tracker that runs entirely in the browser. No build step, no backend, no install — just open index.html.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-server.cjs",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File dev-server-start.ps1",
+    "stop": "powershell -NoProfile -ExecutionPolicy Bypass -File dev-server-stop.ps1",
+    "logs": "node -e \"require('node:fs').createReadStream('dev-server.log',{encoding:'utf8'}).on('data',c=>process.stdout.write(c)).on('end',()=>{})\"",
+    "test": "node tests/run-all.mjs",
+    "test:bail": "node tests/run-all.mjs --bail"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "expense-tracker",
+    "budget",
+    "vanilla-js",
+    "no-build"
+  ],
+  "license": "UNLICENSED"
+}
