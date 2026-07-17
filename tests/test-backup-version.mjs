@@ -17,7 +17,7 @@ function check(name, cond, extra) {
   }
 }
 
-console.log("\n[1] Round-trip: v2 export → v3 import (v2 backups are migrated forward)");
+console.log("\n[1] Round-trip: v2 export → current schema import (v2 backups are migrated forward)");
 {
   const sample = {
     version: 2,
@@ -40,15 +40,15 @@ console.log("\n[1] Round-trip: v2 export → v3 import (v2 backups are migrated 
   const result = parseFullState(json);
   check("import ok=true", result.ok === true, result.error);
   if (result.ok) {
-    check("v2 import is migrated forward to the current schema (v3)",
-      result.state.version === 3);
+    check("v2 import is migrated forward to the current schema (v4)",
+      result.state.version === 4);
     check("expense[0] preserves paymentMethod", result.state.expenses[0].paymentMethod === "upi");
     check("expense[0] preserves upiApp", result.state.expenses[0].upiApp === "phonepe");
     check("profile preserved", result.state.profile.name === "Test");
   }
 }
 
-console.log("\n[2] v1 backup is migrated forward to v3");
+console.log("\n[2] v1 backup is migrated forward to current schema");
 {
   const v1 = {
     version: 1,
@@ -65,7 +65,7 @@ console.log("\n[2] v1 backup is migrated forward to v3");
   const result = parseFullState(JSON.stringify(v1));
   check("v1 import ok=true (after migration)", result.ok === true, result.error);
   if (result.ok) {
-    check("v1 migrated to the current schema (v3)", result.state.version === 3);
+    check("v1 migrated to the current schema (v4)", result.state.version === 4);
     check("v1 has empty profile after migration", result.state.profile && result.state.profile.name === "");
     check("v1 has empty userId after migration",  result.state.profile && result.state.profile.userId === "");
     check("v1 expense paymentMethod backfilled to 'cash'", result.state.expenses[0].paymentMethod === "cash");

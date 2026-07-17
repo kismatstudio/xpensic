@@ -5,7 +5,7 @@
 import { newId } from "./ids.js";
 
 const STORAGE_KEY = "expense-tracker:v1";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const DEFAULT_CATEGORIES = [
   { id: "cat_food",        name: "Food",           color: "#ef4444", isDefault: true  },
@@ -82,6 +82,31 @@ export function migrate(state) {
     }
     if (!isPlainObject(state.profiles)) state.profiles = {};
     state.version = 3;
+  }
+  // v3 -> v4: store per-user data inside the `profiles` registry so each
+  // account gets its own expenses, budgets, and (per-user) categories.
+  // The first registry entry — if any — gets adopted with whatever top-
+  // level data is currently in storage, so existing users don't lose
+  // their history. Once the migration runs, the top-level expenses /
+  // budgets / categories fields are kept in sync with the active profile
+  // (sign-in / sign-out / sign-up handlers update both views together).
+  if (state.version === 3) {
+    if (!isPlainObject(state.profiles)) state.profiles = {};
+    // Pick the most-recently-registered entry as the "owner" of the
+    // existing top-level data, so we can keep the user's history.
+    const ownerId = Object.keys(state.profiles)[0];
+    if (ownerId && isPlainObject(state.profiles[ownerId])) {
+      state.profiles[ownerId].expenses = Array.isArray(state.expenses)
+        ? state.expenses
+        : [];
+      state.profiles[ownerId].budgets = isPlainObject(state.budgets)
+        ? state.budgets
+        : { monthly: {} };
+      state.profiles[ownerId].categories = Array.isArray(state.categories)
+        ? state.categories
+        : [];
+    }
+    state.version = 4;
   }
   return state;
 }
@@ -259,6 +284,111 @@ export const Store = {
     };
     state.profiles[entry.userId] = entry;
     return entry;
+  },
+
+  // --- Per-user data isolation ------------------------------------------
+  // v4+ stores each profile's expenses / budgets / categories inside the
+  // registry entry. The top-level state fields are kept in sync with the
+  // active profile (sign-in / sign-out / sign-up keep them aligned) so
+  // every view can keep reading `state.expenses` etc. without change.
+  //
+  // The "active" profile is the one currently signed in. When the auth
+  // gate is up, `state.profile.userId` is "" and the helpers are no-ops
+  // (the views are hidden anyway).
+
+  /** Make sure a registry entry has the v4 per-user fields. Idempotent. */
+  _ensurePerUserFields(entry) {
+    if (!isPlainObject(entry)) return;
+    if (!Array.isArray(entry.expenses)) entry.expenses = [];
+    if (!isPlainObject(entry.budgets)) entry.budgets = { monthly: {} };
+    if (!isPlainObject(entry.budgets.monthly)) entry.budgets.monthly = {};
+    if (!Array.isArray(entry.categories)) {
+      entry.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+    }
+  },
+
+  /**
+   * Stash the current top-level expenses / budgets / categories into the
+   * registry entry for `userId`. No-op if there's no active profile or
+   * the entry doesn't exist (e.g. the user signed out and the registry
+   * was cleared).
+   */
+  snapshotPerUserData(state, userId) {
+    if (!userId) return;
+    if (!isPlainObject(state.profiles)) state.profiles = {};
+    const entry = state.profiles[userId];
+    if (!isPlainObject(entry)) return;
+    Store._ensurePerUserFields(entry);
+    // Deep-clone the top-level arrays/objects so the registry holds its
+    // own copy and later mutations to state.* don't leak across users.
+    entry.expenses = JSON.parse(JSON.stringify(state.expenses || []));
+    entry.budgets = JSON.parse(JSON.stringify(state.budgets || { monthly: {} }));
+    // Categories: only stow the user's custom (non-default) categories.
+    // Default categories are shared and re-provided by freshState() on
+    // every sign-in, so we don't need to copy them per-user.
+    entry.categories = (state.categories || [])
+      .filter((c) => !c.isDefault)
+      .map((c) => ({ ...c }));
+  },
+
+  /**
+   * Restore the registry entry's per-user fields into the top-level
+   * state. Returns true if anything was restored. If the entry has no
+   * stored data, the top-level fields are seeded with the default
+   * category list and empty expenses / budgets.
+   */
+  restorePerUserData(state, userId) {
+    if (!userId) return false;
+    if (!isPlainObject(state.profiles)) state.profiles = {};
+    const entry = state.profiles[userId];
+    if (!isPlainObject(entry)) return false;
+    Store._ensurePerUserFields(entry);
+
+    // Categories: defaults + any custom ones this user added.
+    state.categories = [
+      ...DEFAULT_CATEGORIES.map((c) => ({ ...c })),
+      ...(entry.categories || []).map((c) => ({ ...c })),
+    ];
+    state.expenses = JSON.parse(JSON.stringify(entry.expenses || []));
+    state.budgets = JSON.parse(JSON.stringify(entry.budgets || { monthly: {} }));
+    return true;
+  },
+
+  /**
+   * Initialize a brand-new per-user data set in the registry entry.
+   * Used on sign-up so the new profile has its own (empty) state from
+   * the start, never inheriting from whoever signed in last.
+   */
+  initPerUserData(state, userId, { adoptFrom } = {}) {
+    if (!userId) return;
+    if (!isPlainObject(state.profiles)) state.profiles = {};
+    const entry = state.profiles[userId];
+    if (!isPlainObject(entry)) return;
+    if (adoptFrom) {
+      // Adopt whatever is currently in the top-level slots, then wipe
+      // them. Used on the very first sign-up so we don't lose whatever
+      // data the user created before auth was wired up.
+      entry.expenses = JSON.parse(JSON.stringify(state.expenses || []));
+      entry.budgets = JSON.parse(JSON.stringify(state.budgets || { monthly: {} }));
+      entry.categories = (state.categories || [])
+        .filter((c) => !c.isDefault)
+        .map((c) => ({ ...c }));
+    } else {
+      entry.expenses = [];
+      entry.budgets = { monthly: {} };
+      entry.categories = [];
+    }
+  },
+
+  /**
+   * Reset the top-level data fields to the default "no user signed in"
+   * view. Used when the user signs out, so the next sign-in starts from
+   * a clean slate.
+   */
+  clearTopLevelData(state) {
+    state.categories = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+    state.expenses = [];
+    state.budgets = { monthly: {} };
   },
 
   // --- Categories ---

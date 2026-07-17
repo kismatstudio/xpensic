@@ -231,8 +231,9 @@ export function mountLogin({ state, onComplete }) {
 
     if (activeTab === "signin") {
       // Sign in: look up the phone in the registry. If we have a match,
-      // adopt that profile (preserve its userId/avatar — the name they
-      // typed is ignored except for personalization of the toast).
+      // adopt that profile (preserve its userId/avatar) and restore the
+      // profile's per-user data (expenses, budgets, custom categories) so
+      // the user sees only their own data.
       const existing = Store.findProfileByPhone(state, phone);
       if (!existing) {
         setPhoneError("No account found for this number. Try Sign up to create one.");
@@ -244,6 +245,7 @@ export function mountLogin({ state, onComplete }) {
         phone: existing.phone,
         avatarDataUrl: existing.avatarDataUrl,
       });
+      Store.restorePerUserData(state, existing.userId);
       const saved = Store.save(state);
       if (!saved.ok) {
         toast("Could not save: " + (saved.error || "unknown error"), "error");
@@ -255,14 +257,24 @@ export function mountLogin({ state, onComplete }) {
       return;
     }
 
-    // Sign up: create a fresh userId, register the profile, activate it.
-    // The name + phone combination is what the user will use to sign back
-    // in on this device later — we don't enforce uniqueness, but the
-    // `userId` is always unique.
+    // Sign up: create a fresh userId, register the profile, initialize
+    // its per-user data (empty by default — except for the very first
+    // sign-up on a previously-unauthed device, where we adopt whatever
+    // was in the top-level slots so the user's history isn't lost), and
+    // activate the profile.
     const userId = newId("user");
     const avatarDataUrl = generateAvatarDataUrl({ name, phone });
     Store.updateProfile(state, { userId, name, phone, avatarDataUrl });
     Store.registerProfile(state, { userId, name, phone, avatarDataUrl });
+    // adoptFrom: true on the first sign-up after a device migration
+    // (i.e. when the top-level slots actually have data we want to
+    // keep); false on every subsequent sign-up so a brand-new account
+    // starts empty.
+    const hasTopLevelData =
+      (state.expenses && state.expenses.length > 0) ||
+      (state.budgets && state.budgets.monthly && Object.keys(state.budgets.monthly).length > 0);
+    Store.initPerUserData(state, userId, { adoptFrom: hasTopLevelData });
+    Store.restorePerUserData(state, userId);
     const saved = Store.save(state);
     if (!saved.ok) {
       toast("Could not save: " + (saved.error || "unknown error"), "error");

@@ -29,7 +29,7 @@ const storeSrc = read("js/store.js");
 // ---- Section 1: store.js — schema + migration --------------------------
 
 console.log("\n[1] store.js: schema version and migration");
-check("SCHEMA_VERSION is 3", /SCHEMA_VERSION\s*=\s*3\b/.test(storeSrc));
+check("SCHEMA_VERSION is 4", /SCHEMA_VERSION\s*=\s*4\b/.test(storeSrc));
 check("freshState adds userId to profile",
   /userId:\s*"",\s*name:\s*"",\s*phone:/.test(storeSrc));
 check("freshState adds profiles registry", /profiles:\s*\{\s*\}/.test(storeSrc));
@@ -42,12 +42,12 @@ check("load backfills profiles registry",
 
 // ---- Section 2: Store migration via the public API ---------------------
 
-console.log("\n[2] Store.migrate: live migration v1 → v2 → v3");
+console.log("\n[2] Store.migrate: live migration v1 → v2 → v3 → v4");
 const { Store, migrate } = await import("../js/store.js");
 
 const v1 = { version: 1, settings: { currency: "INR" }, categories: [], budgets: { monthly: {} }, expenses: [] };
 migrate(v1);
-check("v1 → version is now 3", v1.version === 3);
+check("v1 → version is now 4", v1.version === 4);
 check("v1 → profile.userId is ''", v1.profile?.userId === "");
 check("v1 → profiles is an object", typeof v1.profiles === "object");
 
@@ -57,9 +57,30 @@ const v2 = {
   categories: [], budgets: { monthly: {} }, expenses: [],
 };
 migrate(v2);
-check("v2 → version is now 3", v2.version === 3);
+check("v2 → version is now 4", v2.version === 4);
 check("v2 → preserves existing phone", v2.profile.phone === "9876543210");
 check("v2 → adds userId field", typeof v2.profile.userId === "string");
+
+// v3 → v4 is the "adopt top-level data" migration. We craft a v3 state
+// with a registry entry and top-level expenses, then verify the entry
+// absorbed the top-level data after migration.
+const v3 = {
+  version: 3,
+  settings: { currency: "INR" },
+  profile: { userId: "user_first", name: "First", phone: "9876543210", avatarDataUrl: "" },
+  profiles: { user_first: { userId: "user_first", name: "First", phone: "9876543210", avatarDataUrl: "" } },
+  categories: [{ id: "cat_food", name: "Food", color: "#ef4444", isDefault: true }],
+  budgets: { monthly: { "2026-07": { cat_food: 500 } } },
+  expenses: [{ id: "exp_1", amount: 100, date: "2026-07-10", categoryId: "cat_food", note: "Lunch" }],
+};
+migrate(v3);
+check("v3 → version is now 4", v3.version === 4);
+check("v3 → owner registry entry absorbed top-level expenses",
+  Array.isArray(v3.profiles.user_first.expenses) && v3.profiles.user_first.expenses.length === 1);
+check("v3 → owner registry entry absorbed top-level budgets",
+  v3.profiles.user_first.budgets?.monthly?.["2026-07"]?.cat_food === 500);
+check("v3 → owner registry entry absorbed top-level categories",
+  v3.profiles.user_first.categories?.length === 1);
 
 // ---- Section 3: Store.findProfileByPhone / registerProfile ------------
 
@@ -168,6 +189,113 @@ check("renderNavProfile prefers stored avatarDataUrl",
   /p\.avatarDataUrl\s*\|\|\s*generateAvatarDataUrl\(p\)/.test(main));
 check("render() calls renderNavProfile()",
   /renderNavProfile\(\)/.test(main));
+
+// ---- Section 10: per-user data isolation ------------------------------
+// The whole point of v4: each profile gets its own expenses / budgets /
+// categories. Verify the helpers exist and behave as advertised so the
+// bug "new user sees old user's data" can't regress.
+
+console.log("\n[10] store.js: per-user data isolation");
+check("Store exposes snapshotPerUserData",
+  /snapshotPerUserData[\s\S]{0,200}userId/.test(storeSrc));
+check("Store exposes restorePerUserData",
+  /restorePerUserData[\s\S]{0,200}userId/.test(storeSrc));
+check("Store exposes initPerUserData",
+  /initPerUserData[\s\S]{0,200}userId/.test(storeSrc));
+check("Store exposes clearTopLevelData",
+  /clearTopLevelData\(/.test(storeSrc));
+check("auth flow calls restorePerUserData on sign-in",
+  /Store\.restorePerUserData\(state,\s*existing\.userId\)/.test(login));
+check("auth flow calls initPerUserData on sign-up",
+  /Store\.initPerUserData\(state,\s*userId/.test(login));
+check("signOut snapshots per-user data before clearing",
+  /Store\.snapshotPerUserData\(session\.state,\s*prevUserId\)/.test(signOutFn));
+check("signOut calls clearTopLevelData",
+  /Store\.clearTopLevelData\(session\.state\)/.test(signOutFn));
+
+// Live behavioural test: simulate two users sharing the device.
+const live = {
+  version: 4,
+  settings: { currency: "INR" },
+  profile: { userId: "", name: "", phone: "", avatarDataUrl: "" },
+  profiles: {},
+  categories: [],
+  budgets: { monthly: {} },
+  expenses: [],
+};
+// Sign up Alice.
+const aliceId = "user_alice";
+const aliceAvatar = "av_alice";
+Store.registerProfile(live, { userId: aliceId, name: "Alice", phone: "9876543210", avatarDataUrl: aliceAvatar });
+Store.initPerUserData(live, aliceId);
+Store.restorePerUserData(live, aliceId);
+// Alice logs an expense.
+Store.addExpense(live, {
+  amount: 250, date: "2026-07-15", categoryId: "cat_food", note: "Alice lunch",
+  paymentMethod: "cash",
+});
+check("alice: expense was added to top-level slots",
+  live.expenses.length === 1 && live.expenses[0].note === "Alice lunch");
+
+// Alice signs out.
+Store.snapshotPerUserData(live, aliceId);
+Store.updateProfile(live, { userId: "", name: "", phone: "", avatarDataUrl: "" });
+Store.clearTopLevelData(live);
+check("after alice signs out: top-level expenses are empty",
+  live.expenses.length === 0);
+check("after alice signs out: registry holds Alice's expense",
+  live.profiles[aliceId].expenses.length === 1 &&
+  live.profiles[aliceId].expenses[0].note === "Alice lunch");
+
+// Sign up Bob (a brand-new account — empty starter data).
+const bobId = "user_bob";
+Store.registerProfile(live, { userId: bobId, name: "Bob", phone: "9123456789", avatarDataUrl: "av_bob" });
+Store.initPerUserData(live, bobId);
+Store.restorePerUserData(live, bobId);
+check("bob: top-level expenses are empty (not Alice's)",
+  live.expenses.length === 0);
+check("bob: top-level categories is the default list only",
+  Array.isArray(live.categories) &&
+  live.categories.length === 8 &&
+  live.categories.every((c) => c.isDefault));
+check("bob: registry is still has Alice's data",
+  live.profiles[aliceId].expenses.length === 1);
+
+// Bob logs an expense.
+Store.addExpense(live, {
+  amount: 80, date: "2026-07-15", categoryId: "cat_food", note: "Bob snack",
+  paymentMethod: "upi", upiApp: "phonepe",
+});
+check("bob: his own expense is added",
+  live.expenses.length === 1 && live.expenses[0].note === "Bob snack");
+
+// Bob signs out and Alice signs back in.
+Store.snapshotPerUserData(live, bobId);
+Store.updateProfile(live, { userId: "", name: "", phone: "", avatarDataUrl: "" });
+Store.clearTopLevelData(live);
+const aliceBack = Store.findProfileByPhone(live, "9876543210");
+Store.updateProfile(live, { userId: aliceBack.userId, name: aliceBack.name, phone: aliceBack.phone, avatarDataUrl: aliceBack.avatarDataUrl });
+Store.restorePerUserData(live, aliceBack.userId);
+check("alice signs back in: only her expense is visible",
+  live.expenses.length === 1 && live.expenses[0].note === "Alice lunch");
+check("alice signs back in: her avatar is preserved",
+  live.profile.avatarDataUrl === aliceAvatar);
+check("alice signs back in: her registry entry is preserved",
+  live.profiles[aliceId].expenses.length === 1);
+check("bob's expense is not visible to alice",
+  !live.expenses.some((e) => e.note === "Bob snack"));
+
+// Alice signs out and Bob signs back in.
+Store.snapshotPerUserData(live, aliceBack.userId);
+Store.updateProfile(live, { userId: "", name: "", phone: "", avatarDataUrl: "" });
+Store.clearTopLevelData(live);
+const bobBack = Store.findProfileByPhone(live, "9123456789");
+Store.updateProfile(live, { userId: bobBack.userId, name: bobBack.name, phone: bobBack.phone, avatarDataUrl: bobBack.avatarDataUrl });
+Store.restorePerUserData(live, bobBack.userId);
+check("bob signs back in: only his expense is visible",
+  live.expenses.length === 1 && live.expenses[0].note === "Bob snack");
+check("alice's expense is not visible to bob",
+  !live.expenses.some((e) => e.note === "Alice lunch"));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

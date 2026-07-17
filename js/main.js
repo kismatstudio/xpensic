@@ -692,12 +692,20 @@ function openAddExpenseModal() {
   });
 }
 
-// Sign out — clears the active profile (NOT expenses/categories/budgets and
-// NOT the on-device profile registry) and puts the app back behind the auth
-// gate. The user's data and the registered profile entry are preserved so
-// the same person can sign back in with the same name + phone later.
+// Sign out — stashes the current per-user data into the registry, clears
+// the active profile + the top-level data fields, and puts the app back
+// behind the auth gate. The user's data and the registered profile entry
+// are preserved so the same person can sign back in later.
 function signOut() {
+  const prevUserId = session.state.profile && session.state.profile.userId;
+  // Snapshot the active profile's data into the registry before clearing
+  // the top-level slots. Without this, signing out and back in would
+  // show an empty app.
+  if (prevUserId) {
+    Store.snapshotPerUserData(session.state, prevUserId);
+  }
   Store.updateProfile(session.state, { userId: "", name: "", phone: "", avatarDataUrl: "" });
+  Store.clearTopLevelData(session.state);
   Store.save(session.state);
   toast("Signed out", "success");
   // Reset the route silently to dashboard. We use history.replaceState
