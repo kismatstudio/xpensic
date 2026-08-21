@@ -38,3 +38,28 @@ if ($killed) {
 } else {
   Write-Host 'dev-server: no running server found.'
 }
+
+# Stop the authentication API launched by dev-server-start.ps1.
+$apiPidPath = Join-Path $PSScriptRoot 'server\server.pid'
+$killedApi = $false
+if (Test-Path $apiPidPath) {
+  $apiPid = (Get-Content $apiPidPath -Raw).Trim()
+  $apiProc = Get-Process -Id $apiPid -ErrorAction SilentlyContinue
+  if ($apiProc) {
+    Write-Host "XPENSIC API: stopping pid $apiPid"
+    Stop-Process -Id $apiPid -Force
+    $killedApi = $true
+  }
+  Remove-Item $apiPidPath -Force -ErrorAction SilentlyContinue
+}
+
+# Fallback: if the PID file was stale, find the API by command line.
+if (-not $killedApi) {
+  $apiProc = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+    Where-Object { $_.CommandLine -like '*src/server.js*' } |
+    Select-Object -First 1
+  if ($apiProc) {
+    Write-Host "XPENSIC API: stopping pid $($apiProc.ProcessId) (found by name)"
+    Stop-Process -Id $apiProc.ProcessId -Force
+  }
+}

@@ -1,7 +1,7 @@
 {
-  "name": "expense-tracker",
+  "name": "xpensic",
   "version": "1.0.0",
-  "description": "Lightweight, single-user expense tracker that runs entirely in the browser. No build step, no backend, no install — just open index.html.",
+  "description": "XPENSIC — a lightweight expense tracker that runs entirely in the browser. No build step, no backend, no install.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -21,5 +21,9 @@
     "vanilla-js",
     "no-build"
   ],
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "libsodium-wrappers": "^0.7.16",
+    "libsodium-wrappers-sumo": "^0.7.16"
+  }
 }

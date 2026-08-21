@@ -20,6 +20,7 @@ import { formatCurrency } from "../format.js";
 import { buildProgressBar } from "../components/progress.js";
 import { toast } from "../components/toast.js";
 import { escapeHtml, startOfMonth, monthKey, formatMonth } from "../util.js";
+import { computeBudgetTips, TIP_KIND_ICON } from "../budget-tips.js";
 
 /**
  * Renders the Budgets view.
@@ -51,9 +52,18 @@ export function renderBudgets(container, { state, session, refresh }) {
     <!-- Totals card -->
     <div class="kpi-grid" id="budget-totals"></div>
 
-    <!-- Per-category budget list -->
-    <div class="card" style="padding:0">
-      <div id="budget-list"></div>
+    <!-- Two-column layout: per-category editor on the left (60%),
+         smart suggestions on the right (40%) so both stay visible
+         together instead of the tips being pushed below the long
+         category list. -->
+    <div class="budgets__split">
+      <!-- Per-category budget list (with inline budget editor) -->
+      <div class="card budgets__split-list" style="padding:0">
+        <div id="budget-list"></div>
+      </div>
+
+      <!-- Smart tips (rule-based "AI" suggestions) -->
+      <div class="budgets__split-tips" id="budget-smart-tips"></div>
     </div>
   `;
   container.appendChild(wrap);
@@ -86,6 +96,7 @@ export function renderBudgets(container, { state, session, refresh }) {
   const listHost = wrap.querySelector("#budget-list");
   renderTotals(totalsHost, { state, currentKey, currentLabel, settings });
   renderList(listHost, { state, currentKey, currentLabel, settings, refresh });
+  renderSmartTips(wrap, { state, currentMonth: session.currentMonth, refresh });
 }
 
 function renderTotals(host, { state, currentKey, currentLabel, settings }) {
@@ -229,23 +240,33 @@ function renderRow({ cat, budget, spent, settings }) {
 
   return `
     <li class="budget-list__item" data-id="${cat.id}">
-      <span class="cat-swatch" style="background:${cat.color}"></span>
-      <span class="budget-list__name">${escapeHtml(cat.name)}</span>
-      <span class="budget-list__spent muted">
-        Spent: <strong>${formatCurrency(spent, settings)}</strong>
-      </span>
-      <span class="budget-list__input-wrap">
-        <input
-          type="number" min="0" step="50" inputmode="decimal"
-          class="field__input budget-list__input"
-          data-budget-input data-cat-id="${cat.id}"
-          value="${escapeHtml(value)}" placeholder="0"
-          aria-label="Budget for ${escapeHtml(cat.name)}"
-        />
-      </span>
-      ${hasBudget
-        ? `<button class="icon-btn" type="button" data-budget-clear data-cat-id="${cat.id}" title="Clear budget">×</button>`
-        : `<span class="budget-list__clear-spacer"></span>`}
+      <div class="budget-list__head">
+        <span class="cat-swatch" style="background:${cat.color}"></span>
+        ${cat.icon ? `<span class="cat-icon" aria-hidden="true">${escapeHtml(cat.icon)}</span>` : ""}
+        <span class="budget-list__name">${escapeHtml(cat.name)}</span>
+        <span class="budget-list__spent muted">
+          Spent: <strong>${formatCurrency(spent, settings)}</strong>
+        </span>
+        ${hasBudget
+          ? `<button class="icon-btn budget-list__clear" type="button" data-budget-clear data-cat-id="${cat.id}" title="Clear budget">×</button>`
+          : `<span class="budget-list__clear-spacer"></span>`}
+      </div>
+      <div class="budget-list__editor">
+        <label class="budget-list__editor-label" for="budget-input-${escapeHtml(cat.id)}">
+          Monthly budget
+        </label>
+        <div class="budget-list__editor-row">
+          <span class="budget-list__editor-prefix" aria-hidden="true">${escapeHtml(settings.currencySymbol || "₹")}</span>
+          <input
+            type="number" min="0" step="50" inputmode="decimal"
+            class="field__input budget-list__input"
+            id="budget-input-${escapeHtml(cat.id)}"
+            data-budget-input data-cat-id="${cat.id}"
+            value="${escapeHtml(value)}" placeholder="0"
+            aria-label="Budget for ${escapeHtml(cat.name)}"
+          />
+        </div>
+      </div>
       ${hasBudget
         ? `<div class="budget-list__bar" data-row-bar-host="${cat.id}"></div>`
         : ""}
@@ -285,4 +306,37 @@ function sumBy(_map, arr, pick) {
   let s = 0;
   for (const item of arr) s += pick(item) || 0;
   return s;
+}
+
+// --- Smart tips (rule-based "AI" suggestions) -----------------------------
+// Rendered above the totals card on the Budgets view. Tips are computed
+// pure-function style from state, so they're always in sync with the
+// current month and the latest expenses.
+function renderSmartTips(wrap, { state, currentMonth, refresh }) {
+  const host = wrap.querySelector("#budget-smart-tips");
+  if (!host) return;
+  const tips = computeBudgetTips(state, { month: currentMonth });
+  if (!tips || tips.length === 0) return;
+
+  host.innerHTML = `
+    <div class="card budget-tips" aria-labelledby="budget-tips-title">
+      <div class="card__title" id="budget-tips-title">
+        <span aria-hidden="true">✨</span> Smart suggestions
+      </div>
+      <div class="card__subtitle">
+        Personalised tips based on your spending this month. No data leaves your device.
+      </div>
+      <ul class="budget-tips__list" role="list">
+        ${tips.map((t) => `
+          <li class="budget-tips__item budget-tips__item--${escapeHtml(t.kind)}">
+            <span class="budget-tips__icon" aria-hidden="true">${TIP_KIND_ICON[t.kind] || "•"}</span>
+            <div class="budget-tips__body">
+              <div class="budget-tips__title">${escapeHtml(t.title)}</div>
+              <div class="budget-tips__text">${escapeHtml(t.body)}</div>
+            </div>
+          </li>
+        `).join("")}
+      </ul>
+    </div>
+  `;
 }

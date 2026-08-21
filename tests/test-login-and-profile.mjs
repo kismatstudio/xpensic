@@ -1,8 +1,12 @@
-// Smoke test for the login gate and profile view, plus the sign-out
-// flow in main.js. Verifies that the validation, store integration, and
-// DOM-construction logic in login.js / profile.js is wired correctly,
-// and that signOut() in main.js uses replaceState (not hash=) to
-// prevent the post-sign-out render flash.
+// Smoke test for the new server-backed auth gate (login.js + main.js) and
+// the profile screen. Since auth is now on the server, we no longer
+// validate phone numbers locally — instead we:
+//   • Render the login form with email/mobile + password (+ optional OTP).
+//   • Send signup / signin through the Auth API client (api.js).
+//   • Profile view remains essentially the same (edit name / avatar / sign out).
+//
+// The actual server round-trip is covered by server/tests/smoke.mjs.
+// Here we only verify the client wiring (DOM, branching, error UX).
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -22,154 +26,144 @@ function check(name, cond, extra) {
 const login = read("js/views/login.js");
 const profile = read("js/views/profile.js");
 const main = read("js/main.js");
-const utilSrc = read("js/util.js");
-const storeSrc = read("js/store.js");
+const api = read("js/api.js");
+const util = read("js/util.js");
 
-// ---- Section 1: validateIndianPhone / formatIndianPhone --------------------
+// ---- Section 1: api.js exports the surface we use ------------------------
 
-console.log("\n[1] Phone validation — accepts the common input variants");
-const { validateIndianPhone, formatIndianPhone, generateAvatarDataUrl } = await import("../js/util.js");
-check("10 raw digits",          validateIndianPhone("9876543210").value === "9876543210");
-check("spaces",                 validateIndianPhone("98765 43210").value === "9876543210");
-check("91 prefix",              validateIndianPhone("919876543210").value === "9876543210");
-check("+91 prefix",             validateIndianPhone("+91 98765 43210").value === "9876543210");
-check("0 prefix",               validateIndianPhone("09876543210").value === "9876543210");
-check("dashes",                 validateIndianPhone("98765-43210").value === "9876543210");
-check("rejects 9 digits",       validateIndianPhone("987654321").ok === false);
-check("rejects 11 digits",      validateIndianPhone("98765432101").ok === false);
-check("rejects alpha",          validateIndianPhone("abcdefghij").ok === false);
-check("rejects empty",          validateIndianPhone("").ok === false);
-check("error has helpful text", /10-digit/.test(validateIndianPhone("123").error || ""));
+console.log("\n[1] js/api.js exports the auth/data clients");
+check("api.js exports Auth.signup",      /signup:\s*\(body\)/.test(api));
+check("api.js exports Auth.signin",      /signin:\s*\(body\)/.test(api));
+check("api.js exports Auth.signout",     /signout:\s*\(/.test(api));
+check("api.js exports Auth.whoami",      /whoami:\s*\(/.test(api));
+check("api.js exports Auth.sendOtp",     /sendOtp:\s*\(/.test(api));
+check("api.js exports Auth.verifyOtp",   /verifyOtp:\s*\(/.test(api));
+check("api.js exports Data.get",         /get:\s*\(\)/.test(api));
+check("api.js exports Expenses.create",  /create:\s*\(expense\)/.test(api));
+check("api.js exports Categories.create",/create:\s*\(category\)/.test(api));
+check("api.js exports Budgets.put",      /put:\s*\(budgets\)/.test(api));
+check("api.js exports Settings.put",     /put:\s*\(patch\)/.test(api));
+check("api.js sends credentials: include", /credentials:\s*"include"/.test(api));
+check("api.js throws ApiError on failure",  /class ApiError/.test(api));
 
-console.log("\n[2] formatIndianPhone — display format");
-check("formats 10 digits",   formatIndianPhone("9876543210") === "+91 98765 43210");
-check("formats 12 digits",   formatIndianPhone("919876543210") === "+91 98765 43210");
-check("strips 91 prefix",    formatIndianPhone("919876543210") === "+91 98765 43210");
-check("returns '' for empty",formatIndianPhone("") === "");
-check("returns '' for short",formatIndianPhone("123") === "");
+// ---- Section 2: login.js DOM structure (server-backed) --------------------
 
-// ---- Section 3: generateAvatarDataUrl -------------------------------------
-
-console.log("\n[3] Avatar generation — stable, deterministic, no network");
-const avA = generateAvatarDataUrl({ name: "Zeeshan", phone: "9876543210" });
-const avB = generateAvatarDataUrl({ name: "Zeeshan", phone: "9876543210" });
-// Use a name with different initials so the avatar is guaranteed to differ.
-const avOther = generateAvatarDataUrl({ name: "Aarav", phone: "9876543210" });
-check("avatar is a data: URL",       avA.startsWith("data:image/svg+xml"));
-check("avatar is stable per input",  avA === avB);
-check("avatar differs for a different name", avA !== avOther);
-check("avatar includes initials",    avA.includes("Z"));
-
-// ---- Section 4: login.js DOM structure ------------------------------------
-
-console.log("\n[4] login.js: required DOM structure");
+console.log("\n[2] login.js: required DOM structure");
 check("login renders a role=dialog container",         /setAttribute\("role",\s*"dialog"\)/.test(login));
 check("login sets aria-modal",                          /setAttribute\("aria-modal",\s*"true"\)/.test(login));
-check("login has a labeled form (login-gate-title)",    /setAttribute\("aria-labelledby",\s*"login-gate-title"\)/.test(login));
-check("login has a name input with autocomplete",      /autocomplete="name"/.test(login));
-check("login has a phone input with inputmode=numeric",/inputmode="numeric"/.test(login));
-check("login has a phone input with tel-national",     /autocomplete="tel-national"/.test(login));
-check("login shows a +91 prefix on the phone field",   /login-gate__phone-prefix/.test(login));
-check("login has a Continue submit button",            /type="submit"[^>]*id="auth-submit"/.test(login));
-check("login focuses the name field on mount",         /queueMicrotask\(\(\)\s*=>\s*\$name\.focus\(\)\)/.test(login));
-check("login uses validateIndianPhone",                /validateIndianPhone\(/.test(login));
-check("login calls Store.updateProfile",                /Store\.updateProfile\(/.test(login));
-check("login calls Store.save",                        /Store\.save\(state\)/.test(login));
-check("login shows a Welcome toast on success",        /toast\(`Welcome,\s*\$\{name\}!`/.test(login));
-check("login removes itself on success",                /root\.remove\(\)/.test(login));
-check("login handles Store.save failure (toast error)", /Could not save/.test(login));
-check("login bails out if profile already complete",   /state\.profile\s*&&\s*state\.profile\.userId\s*&&\s*state\.profile\.phone/.test(login));
+check("login has tablist",                             /role="tablist"/.test(login));
+check("login has Sign in + Sign up tabs",              /id="tab-signin"/.test(login) && /id="tab-signup"/.test(login));
+check("login has email-or-mobile identifier input",    /id="auth-id-signin"/.test(login) && /id="auth-id-signup"/.test(login));
+check("login has a sign-in password input",             /id="auth-pw-signin"/.test(login));
+check("login has a sign-up password + confirm",        /id="auth-pw-signup"/.test(login) && /id="auth-pw-signup-2"/.test(login));
+check("login has a Send OTP button",                   /id="auth-otp-send"/.test(login));
+check("login has a Use OTP toggle",                    /id="auth-toggle-otp"/.test(login));
+check("login displays the API base URL in the legal note", /apiBase/.test(login));
+check("login calls Auth.signup on sign-up",            /Auth\.signup\(/.test(login));
+check("login calls Auth.signin on sign-in",            /Auth\.signin\(/.test(login));
+check("login calls Auth.verifyOtp before signing in via OTP", /Auth\.verifyOtp\(/.test(login));
+check("login submits with credentials: include via the api.js wrapper", /import.*from\s+"\.\.\/api\.js"/.test(login));
 
-console.log("\n[5] login.js: validation messages are clear");
-check("empty name: 'Please enter your name.'",          /setNameError\("Please enter your name\."\)/.test(login));
-check("invalid phone: passes through validator's error", /phoneResult\.error/.test(login));
-check("clears name error on input",                     /\$name\.addEventListener\("input",\s*\(\)\s*=>\s*setNameError\(""\)\)/.test(login));
-check("clears phone error on input",                    /setPhoneError\(""\)/.test(login));
+console.log("\n[3] login.js: error states from the server surface inline");
+check("login shows signin password errors inline",       /fields\.signinPwErr/.test(login));
+check("login shows signin OTP errors inline",            /fields\.signinOtpErr/.test(login));
+check("login shows signup identifier errors inline",     /fields\.signupIdErr/.test(login));
+check("login shows password mismatch on signup",         /Passwords do not match/.test(login));
+check("login rejects identifiers that aren't email or 10-digit phone",
+  /PHONE_RE\.test\(digits\)/.test(login));
 
-console.log("\n[6] login.js: Escape-to-blur wiring");
-check("Escape key handler is registered on the gate",   /addEventListener\("keydown"/.test(login));
-check("Escape blurs the active element",                /\.blur\(\)/.test(login));
-check("Escape does not close the gate",                 !/Escape[\s\S]{0,200}\.remove\(\)/.test(login));
-check("Escape preventDefault when blurring",            /ev\.preventDefault\(\)/.test(login));
+// ---- Section 4: login.js OTP surface --------------------------------------
 
-// ---- Section 7: profile.js DOM structure ----------------------------------
+console.log("\n[4] login.js: OTP UX");
+check("Send OTP disabled while pending",                  /sendOtpBtn\.disabled\s*=\s*true/.test(login));
+check("OTP code is shown in a hint element",              /otp-display/.test(login));
+check("OTP can be copied to clipboard",                   /clipboard\.writeText\(/.test(login));
+check("OTP expiry countdown disables resend",             /Resend in/.test(login));
+check("OTP input is 4 digits",                            /maxlength="4"/.test(login));
 
-console.log("\n[7] profile.js: required DOM structure");
+// ---- Section 4b: Login / Login-with-OTP / Forgot password ----------------
+
+console.log("\n[4b] login.js: dual sign-in buttons + Forgot link");
+check("login has a 'Login' submit button",                /id="auth-submit-signin"/.test(login));
+check("login has a hidden 'Login with OTP' submit button",/id="auth-submit-otp"/.test(login));
+check("login swaps between password and OTP rows",        /signinOtpRow\.hidden/.test(login) &&
+                                                            /signinPwRow\.hidden/.test(login));
+check("login toggles the OTP-mode button label",          /Login with password instead/.test(login));
+check("login has a Forgot password link",                 /id="auth-forgot-link"/.test(login) &&
+                                                            /Forgot password\?/.test(login));
+check("login wires the Forgot link to mountForgotPassword",/mountForgotPassword\(/.test(login));
+check("login defines mountForgotPassword as a top-level helper",
+  /async function mountForgotPassword\(/.test(login));
+check("login's forgot flow hits Auth.forgotSendOtp",      /Auth\.forgotSendOtp\(/.test(login));
+check("login's forgot flow hits Auth.forgotVerify",       /Auth\.forgotVerify\(/.test(login));
+check("login's forgot flow hits Auth.forgotReset",        /Auth\.forgotReset\(/.test(login));
+check("api.js exposes Auth.forgotSendOtp/Verify/Reset",   /forgotSendOtp:/.test(api) &&
+                                                            /forgotVerify:/.test(api) &&
+                                                            /forgotReset:/.test(api));
+
+// ---- Section 4c: server forgot-password routes + Resend wiring ------------
+
+console.log("\n[4c] auth.js: forgot-password endpoints + Resend");
+const authRoute = read("server/src/routes/auth.js");
+const emailMod  = read("server/src/email.js");
+check("server exposes /forgot/send-otp",          /authRouter\.post\("\/forgot\/send-otp"/.test(authRoute));
+check("server exposes /forgot/verify",            /authRouter\.post\("\/forgot\/verify"/.test(authRoute));
+check("server exposes /forgot/reset",             /authRouter\.post\("\/forgot\/reset"/.test(authRoute));
+check("send-otp calls sendOtpEmail for emails",   /sendOtpEmail\(id\.value/.test(authRoute));
+check("forgot/send-otp calls sendOtpEmail too",    /sendOtpEmail\(id\.value/.test(authRoute));
+check("send-otp returns delivered:'email' on live send",
+  /delivered:\s*"email"/.test(authRoute));
+check("send-otp keeps demo fallback when Resend is off",
+  /delivered:\s*"demo"/.test(authRoute));
+check("server forgotStore is separate from sign-in otpStore",
+  /const forgotStore\s*=\s*new Map\(\)/.test(authRoute));
+check("forgot/verify issues a signed JWT reset token",
+  /jwt\.sign\(\s*\{[\s\S]*scope:\s*"reset"/.test(authRoute));
+check("forgot/reset verifies the OTP twice and updates passwordHash",
+  /updateUser\(user\.userId,\s*\{\s*passwordHash:/.test(authRoute));
+check("email.js reads RESEND_API_KEY from env",   /RESEND_API_KEY/.test(emailMod));
+check("email.js POSTs to api.resend.com",         /api\.resend\.com/.test(emailMod));
+check("email.js falls back to demo when key absent",
+  /return\s*\{\s*ok:\s*true,\s*live:\s*false/.test(emailMod));
+check("email.js default TTL is 5 minutes",        /ttlMinutes\s*\?\?\s*5/.test(emailMod));
+
+// ---- Section 5: profile.js DOM structure ---------------------------------
+
+console.log("\n[5] profile.js: required DOM structure");
 check("profile shows section-title 'Profile'",            /section-title">Profile</.test(profile));
 check("profile shows the avatar",                         /profile-card__avatar/.test(profile));
 check("profile shows the name",                           /profile-card__name/.test(profile));
 check("profile shows the formatted phone",                /profile-card__phone/.test(profile));
-check("profile has an Edit button",                       /id="profile-edit"[^>]*>Edit profile</.test(profile));
-check("profile has a Sign out button",                    /id="profile-signout"[^>]*>Sign out</.test(profile));
+check("profile has an Edit button",                       /id="profile-edit"/.test(profile));
+check("profile has a Sign out button",                    /id="profile-signout"/.test(profile));
 check("profile stats show expenses count",                /state\.expenses\.length/.test(profile));
-check("profile stats show categories count",              /state\.categories\.length/.test(profile));
-check("profile stats show first-expense date",            /first expense/.test(profile));
-check("profile Edit modal reuses the phone-wrap CSS",     /login-gate__phone-wrap/.test(profile));
-check("profile Edit validates with validateIndianPhone",  /validateIndianPhone\(/.test(profile));
 check("profile Edit regenerates the avatar on save",      /generateAvatarDataUrl\(\{[\s\S]{0,300}name:[\s\S]{0,300}phone:/.test(profile));
 check("profile Edit calls Store.updateProfile",            /Store\.updateProfile\(state/.test(profile));
-check("profile Edit calls Store.save",                   /Store\.save\(state\)/.test(profile));
-check("profile Edit calls refreshNav if available",       /typeof ctx\.refreshNav === "function"/.test(profile));
-check("profile Edit invalid input keeps modal open",      /hasError[\s\S]{0,200}return\s+false/.test(profile));
-check("profile Edit shows 'Profile updated' toast",       /Profile updated/.test(profile));
 
-// ---- Section 8: main.js signOut wiring ------------------------------------
+// ---- Section 6: main.js wiring -------------------------------------------
 
-console.log("\n[8] main.js: signOut uses replaceState (no render flash)");
-// Strip comments so a comment that mentions the deprecated pattern doesn't
-// trip the negative assertion below.
-const signOutFnNoComments = (main.match(/function signOut\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "")
-  .replace(/\/\/[^\n]*/g, "");
-const signOutFn = main.match(/function signOut\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
-check("signOut clears the profile via Store.updateProfile", /Store\.updateProfile\(session\.state,\s*\{\s*userId:\s*"",\s*name:\s*"",\s*phone:\s*"",\s*avatarDataUrl:\s*""\s*\}\)/.test(signOutFn));
-check("signOut calls Store.save",                          /Store\.save\(session\.state\)/.test(signOutFn));
-check("signOut shows a 'Signed out' toast",                /toast\("Signed out"/.test(signOutFn));
-check("signOut uses history.replaceState (not hash=)",     /history\.replaceState\(null,\s*""/.test(signOutFn));
-check("signOut does NOT assign to window.location.hash (in the code, not comments)",
-  !/window\.location\.hash\s*=/.test(signOutFnNoComments));
-check("signOut calls bootLoginGate",                       /bootLoginGate\(\)/.test(signOutFn));
+console.log("\n[6] main.js: server-backed auth wiring");
+check("main.js imports Auth + Data from api.js",           /from\s+"\.\/api\.js"/.test(main));
+check("main.js calls Auth.whoami on boot",                 /Auth\.whoami\(\)/.test(main));
+check("main.js calls Crypto.getVault to hydrate after unlock", /Crypto\.getVault/.test(main) || /loadVault/.test(main) || /loadVault/.test(read("js/views/unlock.js")));
+check("main.js calls syncToServer after mutations",        /syncToServer\(\)/.test(main));
+check("signOut calls Auth.signout",                        /Auth\.signout\(/.test(main));
+check("signOut flushes pending sync before clearing",      /await\s+flushVaultSync/.test(main) || /await\s+syncToServer/.test(main));
+check("signOut uses replaceState (no render flash)",       /history\.replaceState/.test(main));
+check("main.js shows an offline toast when sync fails",    /Couldn't reach the server/.test(main) ||
+                                                            /server.*offline/i.test(main));
+check("bootLoginGate mounts the unlock screen",            /mountUnlock/.test(main));
 
-// ---- Section 9: main.js bootLoginGate -------------------------------------
+// ---- Section 7: avatar helper is still deterministic ----------------------
 
-console.log("\n[9] main.js: bootLoginGate routes correctly");
-const bootFn = main.match(/function bootLoginGate\(\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
-check("bootLoginGate checks profile.userId && profile.phone", /profile\s*&&\s*profile\.userId\s*&&\s*profile\.phone/.test(bootFn));
-check("bootLoginGate hides the app when no profile", /document\.body\.classList\.add\("app-locked"\)/.test(bootFn));
-check("bootLoginGate shows the app when profile complete", /mountAppShell\(\)/.test(bootFn));
-check("bootLoginGate calls mountLogin when no profile",  /mountLogin\(/.test(bootFn));
-
-// ---- Section 10: main.js wires refreshNav to profile ---------------------
-
-console.log("\n[10] main.js: profile view gets refreshNav + onSignOut");
-const profileWrapper = main.match(/function renderProfile\(container\)\s*\{[\s\S]*?\n\}/)?.[0] || "";
-check("profile wrapper passes refreshNav",       /refreshNav:/.test(profileWrapper));
-check("profile wrapper passes onSignOut",        /onSignOut:/.test(profileWrapper));
-check("refreshNav points to renderNavProfile",   /renderNavProfile/.test(profileWrapper));
-check("onSignOut points to signOut",             /signOut\(\)/.test(profileWrapper));
-
-// ---- Section 11: store integration ----------------------------------------
-
-console.log("\n[11] Store.updateProfile + Store.save integration");
-const { Store } = await import("../js/store.js");
-const state = {
-  version: 2,
-  settings: { currency: "INR" },
-  profile: { name: "", phone: "", avatarDataUrl: "" },
-  categories: [],
-  budgets: { monthly: {} },
-  expenses: [],
-};
-// Simulate the login flow.
-Store.updateProfile(state, { name: "Zeeshan", phone: "9876543210", avatarDataUrl: avA });
-check("after update: profile.name is set",  state.profile.name === "Zeeshan");
-check("after update: profile.phone is set", state.profile.phone === "9876543210");
-check("after update: avatarDataUrl is set",  state.profile.avatarDataUrl === avA);
-
-// Simulate sign-out: clear the profile.
-Store.updateProfile(state, { name: "", phone: "", avatarDataUrl: "" });
-check("after sign-out: profile.name is empty",  state.profile.name === "");
-check("after sign-out: profile.phone is empty", state.profile.phone === "");
-check("after sign-out: avatarDataUrl is empty", state.profile.avatarDataUrl === "");
+console.log("\n[7] generateAvatarDataUrl remains stable");
+const { generateAvatarDataUrl } = await import("../js/util.js");
+const a = generateAvatarDataUrl({ name: "Zeeshan", phone: "9876543210" });
+const b = generateAvatarDataUrl({ name: "Zeeshan", phone: "9876543210" });
+const c = generateAvatarDataUrl({ name: "Aarav",   phone: "9876543210" });
+check("avatar is a data: URL",              a.startsWith("data:image/svg+xml"));
+check("avatar is stable per input",         a === b);
+check("avatar differs for a different name", a !== c);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -29,6 +29,15 @@ svg {
   max-width: 100%;
 }
 
+/* Make the HTML `hidden` attribute always win — utility classes (`.field`,
+   `.dash-card`, etc.) often set their own `display`, which would otherwise
+   override `hidden` and accidentally show a panel that should be hidden.
+   Specifically: we use `hidden` on the Sign in / Sign up panels of the
+   login gate, and on the OTP-mode field on the Sign in panel. */
+[hidden] {
+  display: none !important;
+}
+
 input,
 button,
 textarea,

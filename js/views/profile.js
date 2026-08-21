@@ -48,6 +48,8 @@ export function renderProfile(container, ctx) {
                src="${escapeHtml(avatar)}" alt="Profile picture" />
           <div class="profile-card__id">
             <div class="profile-card__name" id="profile-name-display">${escapeHtml(p.name || "—")}</div>
+            ${!p.name ? `<button class="btn btn--sm profile-card__add-name" type="button" id="profile-add-name">+ Add your name</button>` : ""}
+
             <div class="profile-card__phone" id="profile-phone-display">${escapeHtml(phoneDisplay)}</div>
           </div>
         </div>
@@ -103,9 +105,11 @@ export function renderProfile(container, ctx) {
   function wireActions() {
     wrap.querySelector("#profile-edit").addEventListener("click", () => openEdit());
     wrap.querySelector("#profile-signout").addEventListener("click", () => onSignOut());
-  }
-
-  function openEdit() {
+    // The "+ Add your name" CTA only renders when name is empty; the
+    // listener is a no-op when the button doesn't exist.
+    const addNameBtn = wrap.querySelector("#profile-add-name");
+    if (addNameBtn) addNameBtn.addEventListener("click", () => openEdit());
+  }  function openEdit() {
     const p = state.profile || {};
     // Modal-local state for the picture picker. `pendingAvatar` is set by
     // both the device-upload path (a real photo data URL) and the hero

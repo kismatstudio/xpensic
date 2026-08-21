@@ -23,6 +23,10 @@ function freshState() {
     ],
     budgets: { monthly: {} },
     expenses: [],
+    // Login-day tracking (added in the streak refactor). The local
+    // freshState mirrors the production schema so the streak tests
+    // exercise the same shape the live store uses.
+    loginDays: [],
   };
 }
 
@@ -229,6 +233,94 @@ console.log("\n[11] Store.updateProfile — partial patches");
   Store.updateProfile(s, { phone: "9876543210" });
   check("phone updated",                s.profile.phone === "9876543210");
   check("name preserved",               s.profile.name === "Zeeshan");
+}
+
+console.log("\n[12] Store.recordLoginDay — login streak tracking");
+{
+  const s = freshState();
+  check("fresh state has empty loginDays", Array.isArray(s.loginDays) && s.loginDays.length === 0);
+
+  // Recording on a new day appends the date.
+  const first = Store.recordLoginDay(s, "2026-08-10");
+  check("first record returns true", first === true);
+  check("loginDays now has 1 entry", s.loginDays.length === 1);
+  check("loginDays stores the ISO date", s.loginDays[0] === "2026-08-10");
+
+  // Recording the same day again is a no-op.
+  const second = Store.recordLoginDay(s, "2026-08-10");
+  check("duplicate record returns false", second === false);
+  check("loginDays still has 1 entry", s.loginDays.length === 1);
+
+  // A later date is appended at the end.
+  Store.recordLoginDay(s, "2026-08-11");
+  check("loginDays grew to 2 entries", s.loginDays.length === 2);
+  check("loginDays is sorted ascending", s.loginDays[0] === "2026-08-10" && s.loginDays[1] === "2026-08-11");
+
+  // Out-of-order insertion still sorts.
+  Store.recordLoginDay(s, "2026-08-05");
+  check("out-of-order date recorded", s.loginDays.includes("2026-08-05"));
+  check("loginDays stays sorted", s.loginDays.join(",") === "2026-08-05,2026-08-10,2026-08-11");
+
+  // Invalid input is rejected.
+  const bad = Store.recordLoginDay(s, "not-a-date");
+  check("invalid date returns false", bad === false);
+  check("invalid date does not pollute list", !s.loginDays.includes("not-a-date"));
+}
+
+console.log("\n[13] Store.computeLoginStreak");
+{
+  const s = freshState();
+  // Empty list → 0.
+  check("empty loginDays → 0", Store.computeLoginStreak(s, "2026-08-10") === 0);
+
+  // Today recorded → 1.
+  Store.recordLoginDay(s, "2026-08-10");
+  check("today only → 1", Store.computeLoginStreak(s, "2026-08-10") === 1);
+
+  // Today + yesterday → 2.
+  Store.recordLoginDay(s, "2026-08-09");
+  check("today + yesterday → 2", Store.computeLoginStreak(s, "2026-08-10") === 2);
+
+  // Today absent, but yesterday is recorded → still 2 (tolerates missing today).
+  const s2 = freshState();
+  Store.recordLoginDay(s2, "2026-08-09");
+  Store.recordLoginDay(s2, "2026-08-08");
+  check("today missing → fall back to yesterday", Store.computeLoginStreak(s2, "2026-08-10") === 2);
+
+  // Gap breaks the streak at the recent end. Today is missing, so the
+  // cursor starts at yesterday (08-09). The chain 08-09 → 08-08 holds,
+  // but 08-08 → 08-06 is broken so the count stops at 2. To force a
+  // reset to 0 we'd need to leave today's AND yesterday's slots empty.
+  const s2c = freshState();
+  Store.recordLoginDay(s2c, "2026-08-09");
+  Store.recordLoginDay(s2c, "2026-08-08");
+  Store.recordLoginDay(s2c, "2026-08-06");
+  check(
+    "gap in login days caps the streak (not 5)",
+    Store.computeLoginStreak(s2c, "2026-08-10") === 2,
+  );
+
+  // The streak really does reset to 0 when both today AND yesterday are
+  // missing — the cursor falls back to the most recent recorded day.
+  const s2b = freshState();
+  Store.recordLoginDay(s2b, "2026-08-06");
+  check(
+    "no entries near today → streak resets to 0",
+    Store.computeLoginStreak(s2b, "2026-08-10") === 0,
+  );
+
+  // Five consecutive days ending today.
+  const s3 = freshState();
+  for (let i = 0; i < 5; i++) {
+    const d = new Date("2026-08-10T00:00:00");
+    d.setDate(d.getDate() - i);
+    Store.recordLoginDay(s3, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  }
+  check("5 consecutive days → 5", Store.computeLoginStreak(s3, "2026-08-10") === 5);
+
+  // Bad input is safe.
+  check("invalid today → 0", Store.computeLoginStreak(s3, "not-a-date") === 0);
+  check("non-array loginDays → 0", Store.computeLoginStreak("not-an-array", "2026-08-10") === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

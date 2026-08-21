@@ -1,12 +1,18 @@
-// Dashboard view — Phase 4.
+// Dashboard view — Phase 4 + Premium redesign.
 //
 // Layout:
 //   ┌────────────────────────────────────────────────────────────┐
-//   │ Header (KPI grid)                                          │
+//   │ Hero card (greeting + remaining budget + ring + streak)    │
+//   ├────────────────────────────────────────────────────────────┤
+//   │ Smart insights (4 cards)                                   │
+//   ├────────────────────────────────────────────────────────────┤
+//   │ KPI grid: this month / last month / daily avg /           │
+//   │            budget-alert card (spans 2 columns for breathing │
+//   │            room + an internal scroll for long lists)       │
 //   ├────────────────────────────────────────────────────────────┤
 //   │ Quick Add (one-line)                                       │
 //   ├────────────────────────────┬───────────────────────────────┤
-//   │ Category breakdown (chart) │ Recent expenses + budget alert│
+//   │ Category breakdown (chart) │ Recent transactions (cards)   │
 //   └────────────────────────────┴───────────────────────────────┘
 //
 // All amounts come from the store; formatting goes through `formatCurrency`
@@ -15,21 +21,12 @@
 
 import { Store } from "../store.js";
 import { formatCurrency, formatDate } from "../format.js";
+import { isSupported as voiceSupported, startListening as startVoice } from "../voice.js";
 import { toast } from "../components/toast.js";
 import { buildProgressBar } from "../components/progress.js";
 import { renderBarChart } from "../components/chart.js";
 import { confirmDialog } from "../components/confirm.js";
-import {
-  parseQuickAdd,
-  escapeHtml,
-  paymentMethodLabel,
-  upiAppLabel,
-  suggestCategory,
-  todayISO,
-  currentTimeHHMM,
-  monthKey,
-  formatMonth,
-} from "../util.js";
+import { parseQuickAdd, escapeHtml, paymentMethodLabel, upiAppLabel, suggestCategory, todayISO, currentTimeHHMM, monthKey, formatMonth } from "../util.js";
 
 /**
  * Renders the Dashboard into the given container.
@@ -41,8 +38,6 @@ export function renderDashboard(container, ctx) {
   const { state, session, navigate } = ctx;
   const settings = state.settings;
   const currentKey = monthKey(session.currentMonth);
-  // We rebuild the entire view on every render. Simple, predictable, and
-  // fast enough for a single-user app of this size.
 
   // --- Compute this month + last month totals ----------------------------
   const thisMonthExpenses = state.expenses.filter((e) => e.date?.startsWith(currentKey));
@@ -55,18 +50,41 @@ export function renderDashboard(container, ctx) {
   const lastTotal = sum(lastMonthExpenses);
 
   // --- Compute category breakdown for the current month ------------------
-  // "Other" bucket collects any category not in the top 7 so the chart stays
-  // readable when there are many small categories.
   const breakdown = buildCategoryBreakdown(thisMonthExpenses, state.categories);
   const catById = new Map(state.categories.map((c) => [c.id, c]));
+
+  // --- Compute budget totals for the hero card ---------------------------
+  const monthBudgets = (state.budgets.monthly || {})[currentKey] || {};
+  const totalBudget = Object.values(monthBudgets).reduce((s, v) => s + (Number(v) || 0), 0);
+  const remaining = totalBudget - thisTotal;
+  const usedPct = totalBudget > 0 ? Math.min(100, Math.round((thisTotal / totalBudget) * 100)) : 0;
+
+  // --- Compute streak (consecutive days the user has signed in) ----------
+  // The streak is driven by login days (recorded in `state.loginDays`
+  // every time the user successfully signs in), not by expense entries.
+  // This means the badge reflects "how often you open the app" rather
+  // than "how often you log an expense".
+  const streak = computeLoginStreak(state.loginDays, todayISO());
+
+  // --- Compute smart insights --------------------------------------------
+  // Streak is intentionally NOT surfaced here — it lives only on the
+  // Hero card (see renderHeroCard). The "consistency" insight below used
+  // to repeat the streak number; it now falls back to a generic nudge
+  // when the month has no expenses yet, so the grid has a placeholder.
+  const insights = buildInsights({
+    thisTotal, lastTotal, thisMonthExpenses, breakdown, totalBudget, remaining, settings,
+  });
 
   // --- Build DOM ---------------------------------------------------------
   const wrap = document.createElement("div");
   wrap.innerHTML = `
-    <div class="view-header">
-      <h1 class="section-title">Dashboard</h1>
-      <button class="btn btn--primary" type="button" id="dash-add-btn">+ Add expense</button>
-    </div>
+    ${renderHeroCard({
+      name: state.profile?.name || "",
+      remaining, totalBudget, thisTotal, usedPct, streak, settings,
+      monthLabel: formatMonth(session.currentMonth),
+    })}
+
+    ${renderInsights(insights)}
 
     <!-- KPI cards: this month, last month, daily average -->
     <div class="kpi-grid" id="kpi-grid"></div>
@@ -78,24 +96,72 @@ export function renderDashboard(container, ctx) {
         <span class="dash-card__hint">Type a note and amount, e.g. <code>Coffee 180</code></span>
       </div>
       <form class="quick-add" id="quick-add-form" autocomplete="off">
-        <input
-          class="quick-add__input"
-          type="text"
-          id="quick-add-input"
-          placeholder="Coffee 180"
-          aria-label="Quick add expense"
-        />
-        <button class="btn btn--primary" type="submit">Add</button>
-        <input
-          class="quick-add__note"
-          type="text"
-          id="quick-add-note"
-          placeholder="Add a note (optional)"
-          aria-label="Note for the expense (optional)"
-          maxlength="200"
-        />
+        <!-- Row 1: text input + mic + Add button -->
+        <div class="quick-add__row quick-add__row--primary">
+          <input
+            class="quick-add__input"
+            type="text"
+            id="quick-add-input"
+            placeholder="Coffee 180"
+            aria-label="Quick add expense"
+          />
+          <button class="btn voice-entry__btn quick-add__mic" type="button"
+                  id="quick-add-mic" aria-label="Speak expense">
+            <span aria-hidden="true">🎙️</span>
+          </button>
+          <button class="btn btn--primary" type="submit">Add</button>
+        </div>
+        <!-- Row 2: category + payment method dropdowns (always visible) -->
+        <div class="quick-add__row quick-add__row--meta">
+          <label class="quick-add__field">
+            <span class="quick-add__label">Category</span>
+            <select
+              class="field__select quick-add__cat"
+              id="quick-add-cat"
+              aria-label="Category"
+              title="Category"></select>
+          </label>
+          <label class="quick-add__field">
+            <span class="quick-add__label">Payment</span>
+            <select
+              class="field__select quick-add__pay"
+              id="quick-add-pay"
+              aria-label="Payment method"
+              title="Payment method">
+              <option value="cash">Cash</option>
+              <option value="upi">UPI</option>
+              <option value="debit_card">Debit card</option>
+              <option value="credit_card">Credit card</option>
+              <option value="bank_transfer">Bank transfer</option>
+            </select>
+          </label>
+          <label class="quick-add__field quick-add__field--upi" id="quick-add-upi-wrap" hidden>
+            <span class="quick-add__label">UPI app</span>
+            <select
+              class="field__select quick-add__upi"
+              id="quick-add-upi"
+              aria-label="UPI app"
+              title="UPI app">
+              <option value="phonepe">PhonePe</option>
+              <option value="googlepay">Google Pay</option>
+              <option value="paytm">Paytm</option>
+            </select>
+          </label>
+          <label class="quick-add__field quick-add__field--note">
+            <span class="quick-add__label">Note (optional)</span>
+            <input
+              class="quick-add__note"
+              type="text"
+              id="quick-add-note"
+              placeholder="Add a note"
+              aria-label="Note for the expense (optional)"
+              maxlength="200"
+            />
+          </label>
+        </div>
       </form>
       <div class="quick-add__preview" id="quick-add-preview" aria-live="polite"></div>
+      <div class="quick-add__mic-status muted" id="quick-add-mic-status" aria-live="polite"></div>
     </div>
 
     <div class="dash-grid">
@@ -108,16 +174,10 @@ export function renderDashboard(container, ctx) {
         <div id="breakdown-chart"></div>
       </div>
 
-      <!-- Recent expenses + budget alerts -->
-      <div style="display:flex; flex-direction:column; gap: var(--space-4)">
-        <div class="dash-card">
-          <div class="dash-card__title">Recent expenses</div>
-          <div id="recent-list"></div>
-        </div>
-        <div class="dash-card">
-          <div class="dash-card__title">Budget alerts</div>
-          <div id="budget-alerts"></div>
-        </div>
+      <!-- Recent transactions -->
+      <div class="dash-card">
+        <div class="dash-card__title">Recent transactions</div>
+        <div id="recent-list"></div>
       </div>
     </div>
   `;
@@ -127,7 +187,7 @@ export function renderDashboard(container, ctx) {
   wrap.querySelector("#kpi-grid").innerHTML = renderKpiGrid({
     thisTotal, thisCount: thisMonthExpenses.length,
     lastTotal, lastCount: lastMonthExpenses.length,
-    session, settings,
+    session, settings, breakdown, state,
   });
 
   // --- Quick Add ---------------------------------------------------------
@@ -140,27 +200,226 @@ export function renderDashboard(container, ctx) {
     emptyText: "No expenses this month yet.",
   });
 
-  // --- Recent expenses ---------------------------------------------------
+  // --- Recent transactions (modern cards) --------------------------------
   renderRecent(wrap.querySelector("#recent-list"), { state, session, navigate });
-
-  // --- Budget alerts panel -----------------------------------------------
-  // Phase 6 will introduce real per-category budgets. For now we derive
-  // a soft "spend vs. spend × 4" cap so the progress bar UI is visible
-  // and the color thresholds are exercised.
-  renderBudgetAlerts(wrap.querySelector("#budget-alerts"), {
-    state, session, settings, breakdown,
-  });
 
   // --- Add expense (full form) ------------------------------------------
   // Delegate to main.js's shared openAddExpenseModal so the full form has
   // the same modal + validation flow used by the Expenses view's Add button.
-  wrap.querySelector("#dash-add-btn").addEventListener("click", () => ctx.openAddExpenseModal());
+  wrap.querySelector("#dash-add-btn")?.addEventListener("click", () => ctx.openAddExpenseModal?.());
 }
 
-// --- Sub-renderers --------------------------------------------------------
+// ─── Hero card ────────────────────────────────────────────────────────────
+function renderHeroCard({ name, remaining, totalBudget, thisTotal, usedPct, streak, settings, monthLabel }) {
+  const greeting = pickGreeting(name);
+  const motivation = pickMotivation({ remaining, totalBudget, usedPct });
+  const ringCircumference = 2 * Math.PI * 56; // r=56
+  const ringOffset = ringCircumference * (1 - usedPct / 100);
 
-function renderKpiGrid({ thisTotal, thisCount, lastTotal, lastCount, session, settings }) {
-  // Daily average = total spent / day-of-month (clamped to 1 to avoid /0).
+  return `
+    <section class="hero-card" aria-label="Monthly overview">
+      <div class="hero-card__row">
+        <div>
+          <div class="hero-card__greeting">${escapeHtml(greeting)}</div>
+          <h1 class="hero-card__name">${escapeHtml(monthLabel)}</h1>
+          <div class="hero-card__sub">Here's how your money is doing this month.</div>
+
+          <div class="hero-card__budget">
+            <span class="hero-card__budget-label">${totalBudget > 0 ? "Remaining budget" : "Spent so far"}</span>
+            <span class="hero-card__budget-value">
+              ${totalBudget > 0 ? formatCurrency(remaining, settings) : formatCurrency(thisTotal, settings)}
+            </span>
+            <span class="hero-card__budget-meta">
+              ${totalBudget > 0
+                ? `of ${formatCurrency(totalBudget, settings)} budgeted`
+                : `Set a budget to start tracking`}
+            </span>
+          </div>
+
+          <!-- Streak badge — lives ONLY on the hero card (never repeated
+               in the insights grid or anywhere else). Renders in two
+               states:
+                 • streak > 0  → flame + "N-day login streak"
+                 • streak == 0 → flame + "Start your streak today!"
+               Both variants are pill-shaped, sit in the same spot, and
+               carry the same aria-label, so the layout never reflows
+               between users who have an active streak and new users
+               who are about to start one. The number is the centerpiece
+               either way. -->
+          <div class="hero-card__streak" aria-label="Login streak">
+            <span class="hero-card__streak-icon" aria-hidden="true">${streak > 0 ? "🔥" : "✨"}</span>
+            <span>
+              ${streak > 0
+                ? `<strong>${streak}-day</strong> login streak`
+                : `Start your streak today!`}
+            </span>
+          </div>
+
+          <div class="hero-card__motivation" role="note">
+            <span aria-hidden="true">✨</span>
+            <span>${escapeHtml(motivation)}</span>
+          </div>
+        </div>
+
+        <div class="hero-card__ring" aria-label="Budget used: ${usedPct}%">
+          <svg viewBox="0 0 140 140" aria-hidden="true">
+            <circle class="hero-card__ring-track" cx="70" cy="70" r="56" />
+            <circle class="hero-card__ring-fill" cx="70" cy="70" r="56"
+                    stroke-dasharray="${ringCircumference}"
+                    stroke-dashoffset="${ringCircumference}"
+                    data-target-offset="${ringOffset}" />
+          </svg>
+          <div class="hero-card__ring-center">
+            <div>
+              <div class="hero-card__ring-pct">${totalBudget > 0 ? usedPct + "%" : "—"}</div>
+              <div class="hero-card__ring-label">${totalBudget > 0 ? "Used" : "No budget"}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function pickGreeting(name) {
+  const h = new Date().getHours();
+  const tod = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  return name ? `${tod}, ${name}` : `${tod}`;
+}
+
+function pickMotivation({ remaining, totalBudget, usedPct }) {
+  if (totalBudget === 0) {
+    return "Set a monthly budget to unlock insights and savings goals.";
+  }
+  if (usedPct >= 100) {
+    return "You've crossed your budget — review your top categories to find quick wins.";
+  }
+  if (usedPct >= 80) {
+    return "Almost at your limit. Slow down on non-essentials for the rest of the month.";
+  }
+  if (remaining > 0 && usedPct < 50) {
+    return "You're well within budget. Consider moving some of the surplus to a savings goal.";
+  }
+  return "Small consistent actions beat big occasional ones. You're doing great.";
+}
+
+// ─── Smart insights ───────────────────────────────────────────────────────
+function buildInsights({ thisTotal, lastTotal, thisMonthExpenses, breakdown, totalBudget, remaining, settings }) {
+  const insights = [];
+
+  // 1. vs last month
+  if (lastTotal > 0) {
+    const diff = thisTotal - lastTotal;
+    const pct = Math.round((diff / lastTotal) * 100);
+    if (diff > 0) {
+      insights.push({
+        icon: "📈",
+        iconClass: "insight__icon--warn",
+        title: `+${pct}% vs last month`,
+        text: `You spent ${formatCurrency(diff, settings)} more than last month. Check your top categories.`,
+      });
+    } else if (diff < 0) {
+      insights.push({
+        icon: "🎉",
+        iconClass: "insight__icon--success",
+        title: `${Math.abs(pct)}% less than last month`,
+        text: `Nice — you saved ${formatCurrency(Math.abs(diff), settings)} compared to last month.`,
+      });
+    } else {
+      insights.push({
+        icon: "🎯",
+        iconClass: "insight__icon--primary",
+        title: "Same as last month",
+        text: "Your spending is steady. Try a small reduction next month.",
+      });
+    }
+  } else if (thisTotal > 0) {
+    insights.push({
+      icon: "🚀",
+      iconClass: "insight__icon--primary",
+      title: "First month tracked",
+      text: "Welcome! Next month we'll compare your progress automatically.",
+    });
+  }
+
+  // 2. Top category
+  if (breakdown.length > 0) {
+    const top = breakdown[0];
+    const pct = thisTotal > 0 ? Math.round((top.value / thisTotal) * 100) : 0;
+    insights.push({
+      icon: top.icon || "🏷️",
+      iconClass: "insight__icon--accent",
+      title: `${top.name} is your top category`,
+      text: `${formatCurrency(top.value, settings)} (${pct}% of this month's spend).`,
+    });
+  }
+
+  // 3. Budget status
+  if (totalBudget > 0) {
+    if (remaining < 0) {
+      insights.push({
+        icon: "⚠️",
+        iconClass: "insight__icon--danger",
+        title: "Over budget",
+        text: `You're ${formatCurrency(Math.abs(remaining), settings)} over your monthly budget.`,
+      });
+    } else if (remaining > 0 && remaining < totalBudget * 0.2) {
+      insights.push({
+        icon: "🪙",
+        iconClass: "insight__icon--warn",
+        title: "Budget almost used",
+        text: `Only ${formatCurrency(remaining, settings)} left for the rest of the month.`,
+      });
+    } else if (remaining > 0) {
+      insights.push({
+        icon: "💰",
+        iconClass: "insight__icon--success",
+        title: "On track",
+        text: `${formatCurrency(remaining, settings)} remaining — keep it up!`,
+      });
+    }
+  }
+
+  // 4. Fresh-start nudge — shows the "✨ Fresh start" card when the
+  // month has no expenses yet. The streak badge used to live here too,
+  // but per the latest spec the streak is exposed only on the Hero
+  // card (renderHeroCard), not in the insights grid.
+  if (thisMonthExpenses.length === 0) {
+    insights.push({
+      icon: "✨",
+      iconClass: "insight__icon--accent",
+      title: "Fresh start",
+      text: "Add your first expense this month to begin tracking.",
+    });
+  }
+
+  return insights.slice(0, 4);
+}
+
+function renderInsights(insights) {
+  if (!insights.length) return "";
+  return `
+    <div class="insights-grid">
+      ${insights.map((i) => `
+        <div class="insight">
+          <div class="insight__icon ${escapeHtml(i.iconClass || "insight__icon--primary")}" aria-hidden="true">${escapeHtml(i.icon)}</div>
+          <div class="insight__body">
+            <div class="insight__title">${escapeHtml(i.title)}</div>
+            <div class="insight__text">${escapeHtml(i.text)}</div>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+// ─── KPI grid ─────────────────────────────────────────────────────────────
+// The grid hosts three numeric KPIs plus a budget-alert card. The alert
+// card fills the same slot the "Today" / "streak" chips used to occupy,
+// replacing low-value information with the more useful "which categories
+// are about to / already over budget" view. It scrolls internally so a
+// long list of categories fits the same footprint as the other KPIs.
+function renderKpiGrid({ thisTotal, thisCount, lastTotal, lastCount, session, settings, breakdown, state }) {
   const today = new Date();
   const isCurrentMonth =
     today.getFullYear() === session.currentMonth.getFullYear() &&
@@ -168,7 +427,6 @@ function renderKpiGrid({ thisTotal, thisCount, lastTotal, lastCount, session, se
   const dayCount = isCurrentMonth ? Math.max(1, today.getDate()) : 1;
   const daily = thisCount > 0 ? thisTotal / dayCount : 0;
 
-  // "vs. last month" — absolute and percentage. Direction-aware styling.
   let deltaHtml = '<span class="kpi__delta">no data last month</span>';
   if (lastCount > 0) {
     const diff = thisTotal - lastTotal;
@@ -197,25 +455,208 @@ function renderKpiGrid({ thisTotal, thisCount, lastTotal, lastCount, session, se
       <div class="kpi__value">${formatCurrency(daily, settings)}</div>
       <div class="kpi__delta">so far this month</div>
     </div>
-    <div class="kpi">
-      <div class="kpi__label">Today</div>
-      <div class="kpi__value" style="font-size: var(--text-md)">${formatDate(todayISO(), settings)}</div>
+    ${renderBudgetAlertKpi({ state, session, settings, breakdown })}
+  `;
+}
+
+// Budget-alert KPI: scrolls internally, surfaces over-budget categories
+// at the top, descending spend order after. Fits the same grid cell the
+// "Today" / streak chips used to occupy.
+function renderBudgetAlertKpi({ state, session, settings, breakdown }) {
+  const currentKey = monthKey(session.currentMonth);
+  const monthBudgets = (state.budgets.monthly || {})[currentKey] || {};
+  const catById = new Map(state.categories.map((c) => [c.id, c]));
+
+  const rows = [];
+  for (const [catId, budget] of Object.entries(monthBudgets)) {
+    if (!budget || budget <= 0) continue;
+    const cat = catById.get(catId);
+    if (!cat) continue;
+    const spent = breakdown.find((b) => b.id === catId)?.value || 0;
+    rows.push({
+      id: catId,
+      name: cat.name,
+      color: cat.color,
+      icon: cat.icon,
+      spent,
+      budget,
+      fraction: spent / budget,
+    });
+  }
+
+  // Over-budget categories float to the top, then everyone else in
+  // descending fraction (so the most-utilised are most visible).
+  rows.sort((a, b) => {
+    const aOver = a.spent > a.budget ? 1 : 0;
+    const bOver = b.spent > b.budget ? 1 : 0;
+    if (aOver !== bOver) return bOver - aOver;
+    return b.fraction - a.fraction;
+  });
+
+  const hasBudgets = rows.length > 0;
+  const overCount = rows.filter((r) => r.spent > r.budget).length;
+
+  const rowsHtml = hasBudgets
+    ? rows.map((r) => {
+        const over = r.spent > r.budget;
+        const pct = Math.min(100, Math.round(r.fraction * 100));
+        return `
+          <li class="budget-alert-kpi__row ${over ? "budget-alert-kpi__row--over" : ""}">
+            <span class="cat-swatch" style="background:${r.color}"></span>
+            <span class="budget-alert-kpi__name">${escapeHtml(r.name)}</span>
+            <span class="budget-alert-kpi__amt">${formatCurrency(r.spent, settings)} / ${formatCurrency(r.budget, settings)}</span>
+            <span class="budget-alert-kpi__bar"><span class="budget-alert-kpi__fill" style="width:${pct}%; background:${over ? "var(--color-danger, #ef4444)" : r.color}"></span></span>
+          </li>
+        `;
+      }).join("")
+    : "";
+
+  // The chip's TEXT is the summary — e.g. "3 over budget · 7 on track".
+  // The colour class is applied separately so the chip can be rendered
+  // as a real styled pill (not a raw `<span>`). Kept as a plain string
+  // (no wrapper elements) so the chip's className is the only thing
+  // that owns the visual state.
+  const subText = hasBudgets
+    ? (overCount > 0
+        ? `${overCount} over budget · ${rows.length - overCount} on track`
+        : `All ${rows.length} categories on track`)
+    : "No budgets set yet";
+
+  // The "N over budget" summary is rendered inline in the label row so
+  // it doesn't consume a whole line above the list. When the user is
+  // over budget on at least one category, the chip renders in danger
+  // colour; otherwise it renders in the muted text colour. The chip
+  // is hidden when there are no budgets at all (the empty-state copy
+  // already communicates that).
+  const summaryChip = hasBudgets
+    ? `<span class="budget-alert-kpi__chip ${overCount > 0 ? "budget-alert-kpi__chip--over" : "budget-alert-kpi__chip--ok"}" aria-label="Exceeded budgets">${escapeHtml(subText)}</span>`
+    : "";
+
+  return `
+    <div class="kpi kpi--wide kpi--budget-alert" aria-label="Budget alerts">
+      <div class="kpi__label">
+        <span class="budget-alert-kpi__title">Budget alerts</span>
+        <span class="budget-alert-kpi__label-right">
+          ${summaryChip}
+          <a class="budget-alert-kpi__link" href="#/budgets">Manage →</a>
+        </span>
+      </div>
+      ${hasBudgets
+        ? `<ul class="budget-alert-kpi__list">${rowsHtml}</ul>`
+        : `<div class="budget-alert-kpi__empty">
+             <a class="btn btn--sm btn--primary" href="#/budgets">Set a budget</a>
+           </div>`}
     </div>
   `;
 }
 
+// ─── Quick Add ─────────────────────────────────────────────────────────────
 function mountQuickAdd(wrap, ctx) {
   const form = wrap.querySelector("#quick-add-form");
   const input = wrap.querySelector("#quick-add-input");
   const noteInput = wrap.querySelector("#quick-add-note");
   const preview = wrap.querySelector("#quick-add-preview");
-  // Capture settings so the toast message can format the amount the same
-  // way the rest of the dashboard does (incl. INR / position / symbol).
+  const paySelect = wrap.querySelector("#quick-add-pay");
+  const upiSelect = wrap.querySelector("#quick-add-upi");
+  const catSelect = wrap.querySelector("#quick-add-cat");
+
+  function refreshCategoryOptions() {
+    if (!catSelect) return;
+    catSelect.innerHTML = "";
+    for (const c of ctx.state.categories) {
+      const opt = document.createElement("option");
+      opt.value = c.id;
+      opt.textContent = c.icon ? c.icon + "  " + c.name : c.name;
+      catSelect.appendChild(opt);
+    }
+  }
+  refreshCategoryOptions();
+
+  function syncPayFields() {
+    if (!paySelect) return;
+    const isUpi = paySelect.value === "upi";
+    const upiWrap = wrap.querySelector("#quick-add-upi-wrap");
+    if (upiWrap) upiWrap.hidden = !isUpi;
+    if (upiSelect) {
+      upiSelect.required = isUpi;
+      upiSelect.disabled = !isUpi;
+    }
+  }
+  if (paySelect) {
+    paySelect.addEventListener("change", syncPayFields);
+    syncPayFields();
+  }
+
+  const micBtn = wrap.querySelector("#quick-add-mic");
+  const micStatus = wrap.querySelector("#quick-add-mic-status");
+  if (micBtn && voiceSupported()) {
+    let voiceActive = null;
+    micBtn.addEventListener("click", () => {
+      if (voiceActive) {
+        voiceActive.stop();
+        return;
+      }
+      micBtn.classList.add("is-listening");
+      const originalLabel = micBtn.innerHTML;
+      const resetLabel = () => { micBtn.classList.remove("is-listening"); micBtn.innerHTML = originalLabel; };
+      voiceActive = startVoice({
+        categories: ctx.state.categories,
+        onTick: (remainingMs) => {
+          const s = Math.ceil(remainingMs / 1000);
+          micBtn.innerHTML = `<span aria-hidden="true">🎙️</span> ${s}s`;
+        },
+        onInterim: (t) => {
+          if (micStatus) micStatus.textContent = `Hearing: "${t}"`;
+        },
+        onFinal: (r) => {
+          if (r.amount != null) {
+            input.value = `${r.note || ""} ${r.amount}`.trim();
+          } else if (r.note) {
+            input.value = r.note;
+          }
+          if (r.note) noteInput.value = r.note;
+          if (r.paymentMethod && paySelect) {
+            paySelect.value = r.paymentMethod;
+            paySelect.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          if (r.upiApp && upiSelect) {
+            upiSelect.value = r.upiApp;
+          }
+          if (r.categoryId && catSelect) {
+            catSelect.value = r.categoryId;
+          }
+          if (micStatus) {
+            const bits = [];
+            if (r.amount != null) bits.push(`₹${r.amount}`);
+            if (r.note) bits.push(`"${r.note}"`);
+            if (r.paymentMethod && r.paymentMethod !== "cash") bits.push(r.paymentMethod.replace("_", " "));
+            if (r.upiApp) bits.push(r.upiApp);
+            micStatus.textContent = bits.length
+              ? `Captured: ${bits.join(" · ")} — hit Add to save.`
+              : `Couldn't capture anything from "${r.transcript}".`;
+          }
+          voiceActive = null;
+          resetLabel();
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        },
+        onError: (err) => {
+          if (micStatus) micStatus.textContent = err.message;
+          voiceActive = null;
+          resetLabel();
+        },
+        onEnd: () => {
+          if (voiceActive) {
+            voiceActive = null;
+            resetLabel();
+          }
+        },
+      });
+    });
+  } else if (micBtn) {
+    micBtn.style.display = "none";
+  }
   const settings = ctx.state.settings;
 
-  // Live preview — as the user types, show what the parser will pick out.
-  // Updating the preview on every input event gives instant feedback
-  // ("yes, 180 was recognized as the amount").
   input.addEventListener("input", () => {
     const raw = input.value;
     if (!raw.trim()) {
@@ -224,13 +665,11 @@ function mountQuickAdd(wrap, ctx) {
     }
     const { amount, note } = parseQuickAdd(raw);
     const settings = ctx.state.settings;
-    // Look up the suggested category from the note and resolve the full
-    // category object so we can show its color + name in the preview.
     const catById = new Map(ctx.state.categories.map((c) => [c.id, c]));
     const sugMatch = suggestCategory(note);
     const sug = sugMatch ? catById.get(sugMatch.id) : null;
     const sugChip = sug
-      ? `<span class="cat-chip"><span class="cat-swatch" style="background:${sug.color}"></span>${escapeHtml(sug.name)}</span>`
+      ? `<span class="cat-chip"><span class="cat-swatch" style="background:${sug.color}"></span>${sug.icon ? `<span class="cat-icon" aria-hidden="true">${escapeHtml(sug.icon)}</span>` : ""}${escapeHtml(sug.name)}</span>`
       : "";
     const noteChip = note
       ? `<span class="muted">“${escapeHtml(note)}”</span>`
@@ -241,24 +680,19 @@ function mountQuickAdd(wrap, ctx) {
     preview.innerHTML = `${amountChip} ${noteChip} ${sugChip}`;
   });
 
-  // Submit handler: parse → validate → save directly.
-  // For Quick Add we don't open the full review modal — the whole point is
-  // one-line entry. We still validate the amount and category so we never
-  // persist garbage, and we show a toast so the user knows it worked.
+  if (!wrap._quickAddBound) {
+    wrap._quickAddBound = true;
+    document.addEventListener("expense-tracker:categories-changed", refreshCategoryOptions);
+  }
+
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const raw = input.value;
     const { amount } = parseQuickAdd(raw);
-    // Note precedence: explicit note field > parsed-from-input > raw input.
-    // The user can leave the note field empty to skip it; we fall back to
-    // whatever the parser extracted (e.g. "Coffee" from "Coffee 180") so
-    // the auto-suggestion still works.
     const explicitNote = (noteInput?.value || "").trim();
     const parsedNote = parseQuickAdd(raw).note;
     const finalNote = explicitNote || parsedNote || raw;
 
-    // If the user typed something but no number was found, ask for confirmation
-    // before adding a 0-amount entry — that would just be clutter.
     if (amount == null) {
       const ok = await confirmDialog({
         title: "No amount detected",
@@ -269,23 +703,21 @@ function mountQuickAdd(wrap, ctx) {
       if (!ok) return;
     }
 
-    // Build the expense. Use the first category as a safe fallback if no
-    // suggestion is found; the user can always change it via Edit later.
-    // The category suggestion is driven by whichever note wins (explicit
-    // takes priority), so the user's typed note still controls the auto-pick.
     const sug = suggestCategory(finalNote);
     const fallbackId = ctx.state.categories[0]?.id || "";
+    const paymentMethod = (paySelect && paySelect.value) || "cash";
+    const upiApp = (upiSelect && paymentMethod === "upi") ? upiSelect.value : "";
+    const explicitCat = catSelect && catSelect.value ? catSelect.value : "";
     const expense = {
       amount: amount != null ? amount : 0,
       date: todayISO(),
       time: currentTimeHHMM(),
-      categoryId: sug?.id || fallbackId,
+      categoryId: explicitCat || (sug && sug.id) || fallbackId,
       note: finalNote,
-      paymentMethod: "cash",
-      upiApp: "",
+      paymentMethod,
+      upiApp,
     };
 
-    // Guard: at least one category must exist.
     if (!expense.categoryId) {
       toast("Add a category first (Categories view)", "error");
       return;
@@ -293,8 +725,6 @@ function mountQuickAdd(wrap, ctx) {
 
     Store.addExpense(ctx.state, expense);
     Store.save(ctx.state);
-    // Show the note in the toast only if the user actually provided one —
-    // otherwise the toast stays short ("Added ₹180 · expense").
     const noteTail = explicitNote ? ` · "${explicitNote}"` : "";
     toast(`Added ${formatCurrency(expense.amount, settings)}${noteTail}`, "success");
     input.value = "";
@@ -304,131 +734,126 @@ function mountQuickAdd(wrap, ctx) {
   });
 }
 
+// ─── Recent transactions (modern cards) ───────────────────────────────────
 function renderRecent(host, { state, session, navigate }) {
-  // Show the 5 most recent expenses regardless of the selected month.
-  // Sorting by date desc, then time desc gives a stable order.
+  const currentKey = monthKey(session.currentMonth);
   const recent = state.expenses
-    .slice()
+    .filter((e) => e.date?.startsWith(currentKey))
     .sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? 1 : -1;
       return (b.time || "").localeCompare(a.time || "");
     })
-    .slice(0, 5);
+    .slice(0, 6);
 
   if (recent.length === 0) {
-    host.innerHTML = `<div class="muted">No expenses yet.</div>`;
+    host.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__title">No transactions yet</div>
+        <div class="empty-state__body">Add your first expense to start tracking.</div>
+      </div>
+    `;
     return;
   }
   const catById = new Map(state.categories.map((c) => [c.id, c]));
   host.innerHTML = `
-    <ul class="recent-list" role="list">
+    <ul class="tx-list" role="list">
       ${recent.map((e) => {
         const cat = catById.get(e.categoryId);
         const method = paymentMethodLabel(e.paymentMethod);
         const app = e.paymentMethod === "upi" && e.upiApp ? " · " + upiAppLabel(e.upiApp) : "";
         return `
-          <li class="recent-item">
-            <span class="cat-swatch" style="background:${cat?.color || "var(--color-border-strong)"}"></span>
-            <span class="recent-item__title">
-              <strong>${escapeHtml(cat?.name || "—")}</strong>
-              <span class="muted"> · ${escapeHtml(method)}${escapeHtml(app)}</span>
-              ${e.note ? `<div class="muted" style="font-size:var(--text-xs)">${escapeHtml(e.note)}</div>` : ""}
-            </span>
-            <span class="recent-item__amount">${formatCurrency(e.amount, state.settings)}</span>
+          <li class="tx-card">
+            <div class="tx-card__icon" aria-hidden="true" style="background:${cat?.color || "var(--color-surface-3)"}20;color:${cat?.color || "var(--color-text-muted)"}">
+              ${escapeHtml(cat?.icon || "•")}
+            </div>
+            <div class="tx-card__body">
+              <div class="tx-card__title">${escapeHtml(e.note || cat?.name || "Expense")}</div>
+              <div class="tx-card__meta">
+                <span>${escapeHtml(cat?.name || "—")}</span>
+                <span aria-hidden="true">·</span>
+                <span>${escapeHtml(method)}${escapeHtml(app)}</span>
+              </div>
+            </div>
+            <div class="tx-card__amount">${formatCurrency(e.amount, state.settings)}</div>
           </li>
         `;
       }).join("")}
     </ul>
-    <div style="margin-top: var(--space-2)">
-      <a class="muted" href="#/expenses" style="font-size: var(--text-sm)">View all →</a>
+    <div style="margin-top: var(--space-3); text-align: right">
+      <a class="btn btn--ghost btn--sm" href="#/expenses">View all →</a>
     </div>
   `;
 }
 
-function renderBudgetAlerts(host, { state, session, settings, breakdown }) {
-  // Real per-category budgets (Phase 6). The dashboard shows every category
-  // that has a budget set for the current month, sorted by how close they
-  // are to their limit (the most urgent at the top).
-  const currentKey = monthKey(session.currentMonth);
-  const monthBudgets = (state.budgets.monthly || {})[currentKey] || {};
-  const catById = new Map(state.categories.map((c) => [c.id, c]));
+// ─── Budget alerts (KPI card) ────────────────────────────────────────────
+// Note: the budget-alert card moved into the KPI grid (see
+// renderBudgetAlertKpi). The original inline card in the right column
+// has been removed; the popup-on-mount flow has been removed too. The
+// KPI cell scrolls internally and floats over-budget categories to the
+// top.
 
-  // Build rows: { id, name, color, spent, budget, fraction }.
-  const rows = [];
-  for (const [catId, budget] of Object.entries(monthBudgets)) {
-    if (!budget || budget <= 0) continue;
-    const cat = catById.get(catId);
-    if (!cat) continue; // category was deleted; ignore its orphan budget
-    const spent = breakdown.find((b) => b.id === catId)?.value || 0;
-    rows.push({ id: catId, name: cat.name, color: cat.color, spent, budget, fraction: spent / budget });
-  }
-
-  if (rows.length === 0) {
-    host.innerHTML = `
-      <div class="muted">
-        No budgets set for this month.
-        <br />
-        <a class="muted" href="#/budgets" style="font-size: var(--text-sm)">Set one in the Budgets view →</a>
-      </div>
-    `;
-    return;
-  }
-
-  // Sort: highest fraction first (most urgent), then by absolute overspend.
-  rows.sort((a, b) => b.fraction - a.fraction || (b.spent - b.budget) - (a.spent - a.budget));
-
-  host.innerHTML = rows.map((r) => {
-    const over = r.spent > r.budget;
-    return `
-      <div class="budget-alert">
-        <div class="budget-alert__name">
-          <span class="cat-swatch" style="background:${r.color}"></span>
-          ${escapeHtml(r.name)}
-        </div>
-        <div class="budget-alert__amounts">
-          ${formatCurrency(r.spent, settings)} / ${formatCurrency(r.budget, settings)}
-          ${over ? `<br/><span class="kpi__delta kpi__delta--up">over by ${formatCurrency(r.spent - r.budget, settings)}</span>` : ""}
-        </div>
-      </div>
-      <div class="budget-alert__bar" data-attach-progress
-           data-value="${r.spent}" data-max="${r.budget}" data-label="${escapeHtml(r.name)} budget"
-           style="margin-bottom: var(--space-3)"></div>
-    `;
-  }).join("");
-
-  // After the HTML is in the DOM, swap the placeholder for a real
-  // progress bar so we can use the proper ARIA attributes and a11y wiring.
-  host.querySelectorAll("[data-attach-progress]").forEach((el) => {
-    el.replaceWith(buildProgressBar({
-      value: Number(el.dataset.value),
-      max: Number(el.dataset.max),
-      label: el.dataset.label,
-    }));
-  });
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function sum(expenses) {
+  return expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 }
 
-// --- Helpers --------------------------------------------------------------
-
-/** Build a sorted list of category → total for the chart. */
 function buildCategoryBreakdown(expenses, categories) {
   const totals = new Map();
   for (const e of expenses) {
     if (!e.categoryId) continue;
-    totals.set(e.categoryId, (totals.get(e.categoryId) || 0) + e.amount);
+    totals.set(e.categoryId, (totals.get(e.categoryId) || 0) + (Number(e.amount) || 0));
   }
   const catById = new Map(categories.map((c) => [c.id, c]));
-  const out = [];
+  const rows = [];
   for (const [id, value] of totals) {
     const cat = catById.get(id);
     if (!cat) continue;
-    out.push({ id, label: cat.name, value, color: cat.color });
+    rows.push({ id, name: cat.name, color: cat.color, icon: cat.icon, value });
   }
-  return out;
+  rows.sort((a, b) => b.value - a.value);
+  // Bucket anything past the top 7 into "Other" so the chart stays readable.
+  if (rows.length > 7) {
+    const top = rows.slice(0, 7);
+    const otherValue = rows.slice(7).reduce((s, r) => s + r.value, 0);
+    top.push({ id: "__other", name: "Other", color: "#94A3B8", icon: "•", value: otherValue });
+    return top;
+  }
+  return rows;
 }
 
-function sum(expenses) {
-  return expenses.reduce((s, e) => s + (e.amount || 0), 0);
+/**
+ * Compute the user's current "login streak" — the number of consecutive
+ * days (counting back from `today`) on which the user signed in. Backed
+ * by `state.loginDays` (a list of YYYY-MM-DD strings maintained by the
+ * Store on every successful sign-in). Today being absent is tolerated —
+ * the cursor starts at yesterday so the streak doesn't reset just because
+ * the user hasn't opened the app yet today.
+ *
+ * The function is intentionally local to the dashboard (the Hero card is
+ * the only surface that displays the streak). The Store exposes
+ * `Store.computeLoginStreak(state, todayISO)` for the test suite, but
+ * the dashboard re-implements the math inline so it can reuse the
+ * resolved `state.loginDays` from the surrounding context.
+ */
+function computeLoginStreak(loginDays, todayIso) {
+  if (!Array.isArray(loginDays) || !todayIso) return 0;
+  const days = new Set(loginDays);
+  const cursor = new Date(`${todayIso}T00:00:00`);
+  if (Number.isNaN(cursor.getTime())) return 0;
+  if (!days.has(toISODate(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let streak = 0;
+  while (days.has(toISODate(cursor))) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
 }
 
-// todayISO, currentTimeHHMM, monthKey, formatMonth are all imported from
-// ../util.js (single source of truth, used by main.js / budgets.js too).
+function toISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}

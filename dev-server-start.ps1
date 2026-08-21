@@ -14,18 +14,87 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-# Don't start a second server if one's already running.
+# Start the authentication API first when its dependencies are installed.
+# The client login gate depends on this service at http://127.0.0.1:8787.
+$serverRoot = Join-Path $PSScriptRoot 'server'
+$apiPort = 8787
+$apiPidPath = Join-Path $serverRoot 'server.pid'
+
+function Test-ApiListening {
+  param([int]$Port, [int]$TimeoutMs = 2000)
+  $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+  while ((Get-Date) -lt $deadline) {
+    if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
+      return $true
+    }
+    Start-Sleep -Milliseconds 100
+  }
+  return $false
+}
+
+function Get-ApiProcess {
+  # Match the actual command line: `node src/server.js` (launched from server/).
+  # The previous pattern `*server*src*server.js*` failed because the command
+  # line doesn't contain the literal word "server" — only the path segments.
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+    Where-Object { $_.CommandLine -like '*src/server.js*' } |
+    Select-Object -First 1
+}
+
+if (-not (Test-Path (Join-Path $serverRoot 'node_modules'))) {
+  Write-Host "XPENSIC API dependencies are missing. Run: cd server; npm.cmd install"
+} elseif (Test-ApiListening -Port $apiPort) {
+  Write-Host "XPENSIC API: already listening on port $apiPort."
+  # Refresh the PID file so `npm run stop` can find it.
+  $apiProc = Get-ApiProcess
+  if ($apiProc) { $apiProc.ProcessId | Out-File $apiPidPath -Encoding ASCII -NoNewline }
+} else {
+  # Clean up any stale PID file before starting.
+  if (Test-Path $apiPidPath) { Remove-Item $apiPidPath -Force }
+
+  # If something else is holding the port (a zombie from a prior session),
+  # surface it instead of silently failing.
+  $portHolder = Get-NetTCPConnection -LocalPort $apiPort -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if ($portHolder) {
+    Write-Host "XPENSIC API: port $apiPort is held by pid $($portHolder.OwningProcess). Stop it first."
+  } else {
+    Start-Process `
+      -FilePath 'node' `
+      -ArgumentList 'src/server.js' `
+      -WorkingDirectory $serverRoot `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput (Join-Path $serverRoot 'server.log') `
+      -RedirectStandardError (Join-Path $serverRoot 'server-error.log')
+
+    # Poll for the port to come up (up to ~5s) instead of a fixed sleep.
+    if (Test-ApiListening -Port $apiPort -TimeoutMs 5000) {
+      $apiProc = Get-ApiProcess
+      if ($apiProc) {
+        $apiProc.ProcessId | Out-File $apiPidPath -Encoding ASCII -NoNewline
+        Write-Host "XPENSIC API: started (pid $($apiProc.ProcessId)) on http://127.0.0.1:$apiPort"
+      } else {
+        Write-Host "XPENSIC API: listening on $apiPort but could not record PID."
+      }
+    } else {
+      Write-Host "XPENSIC API: failed to start within 5s. Check server\server-error.log"
+    }
+  }
+}
+
+# Don't start a second static server if one's already running.
 if (Test-Path 'dev-server.pid') {
   $existingPid = (Get-Content 'dev-server.pid' -Raw).Trim()
   $running = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
   if ($running) {
-    Write-Host "dev-server: already running (pid $existingPid). Stop it first with \`npm run stop\`."
-    exit 0
+    Write-Host "dev-server: already running (pid $existingPid)."
   } else {
     # Stale PID file; clean it up.
     Remove-Item 'dev-server.pid' -Force
   }
 }
+
+if (-not (Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)) {
 
 # Launch the server detached. -WindowStyle Hidden prevents a console window
 # from popping up. We use cmd's `>` to merge stdout and stderr into a single
@@ -62,4 +131,7 @@ if ($nodeProc) {
 } else {
   Write-Host "dev-server: started, but could not find the node process. Stop with:"
   Write-Host "  taskkill /F /FI ""IMAGENAME eq node.exe"""
+}
+} else {
+  Write-Host "dev-server: already listening on port 8765."
 }

@@ -19,6 +19,7 @@ import {
   UPI_APPS,
   suggestCategory,
 } from "../util.js";
+import { isSupported as voiceSupported, startListening } from "../voice.js";
 
 /**
  * @param {object} ctx
@@ -49,23 +50,107 @@ export function buildExpenseForm({ categories, expense }) {
   });
   form.appendChild(amountGroup.root);
 
-  // --- Date ---------------------------------------------------------------
-  // Auto-fill with today for new expenses. <input type="date"> expects
-  // the ISO YYYY-MM-DD format directly, which `todayISO()` already returns.
-  const dateGroup = fieldGroup("Date", "date", "date", {
-    required: true,
-    value: expense?.date || todayISO(),
-  });
-  form.appendChild(dateGroup.root);
+  // --- Speak Expense (top-right corner) -----------------------------------
+  // Rendered as a small floating button in the top-right of the form so it
+  // stays visible regardless of the order of fields below. Hidden on
+  // browsers without the Web Speech API so it never shows a broken button.
+  if (voiceSupported()) {
+    const voiceWrap = document.createElement("div");
+    voiceWrap.className = "voice-entry voice-entry--top-right";
+    voiceWrap.innerHTML = `
+      <button type="button" class="btn voice-entry__btn" id="voice-mic"
+              aria-label="Voice expense entry">
+        <span aria-hidden="true">🎙️</span>
+        <span class="voice-entry__label">Speak Expense</span>
+      </button>
+      <span class="voice-entry__status muted" id="voice-status" aria-live="polite"></span>
+    `;
+    form.appendChild(voiceWrap);
 
-  // --- Time (auto-filled from system clock) -------------------------------
-  // Captured automatically when adding a new expense. Stored as HH:MM in 24h
-  // format; left blank for legacy records that don't have it.
-  const timeGroup = fieldGroup("Time", "time", "time", {
-    value: expense?.time || currentTimeHHMM(),
-    placeholder: "HH:MM",
-  });
-  form.appendChild(timeGroup.root);
+    const micBtn = voiceWrap.querySelector("#voice-mic");
+    const statusEl = voiceWrap.querySelector("#voice-status");
+    let active = null;
+
+    function setListening(on) {
+      micBtn.classList.toggle("is-listening", on);
+      micBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      micBtn.querySelector(".voice-entry__label").textContent = on ? "Listening…" : "Speak Expense";
+      statusEl.textContent = on ? "Say something like 'Coffee 180'" : "";
+    }
+
+    micBtn.addEventListener("click", () => {
+      if (active) {
+        active.stop();
+        active = null;
+        setListening(false);
+        return;
+      }
+      setListening(true);
+      active = startListening({
+        // Pass the category list so parseVoiceCommand can pick the right one.
+        categories,
+        onInterim: (t) => { statusEl.textContent = `Hearing: "${t}"`; },
+        onTick: (remainingMs) => {
+          // Update the button label with a countdown so the user knows
+          // how much listen time is left.
+          const s = Math.ceil(remainingMs / 1000);
+          micBtn.querySelector(".voice-entry__label").textContent =
+            `Listening… ${s}s`;
+        },
+        onFinal: (r) => {
+          // Apply the parsed result to the form. parseVoiceCommand
+          // extracts amount + note + payment method + UPI app + a
+          // category hint.
+          if (r.amount != null) amountGroup.input.value = String(r.amount);
+          if (r.note) noteGroup.input.value = r.note;
+          if (r.paymentMethod && paySelect) {
+            paySelect.value = r.paymentMethod;
+            paySelect.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          if (r.upiApp && upiSelect) {
+            upiSelect.value = r.upiApp;
+          }
+          if (r.categoryId && catSelect) {
+            catSelect.value = r.categoryId;
+          }
+          if (r.datetime) {
+            // Voice command may include a datetime — push it back into the
+            // combined picker so the user can see / edit it.
+            const iso = r.datetime.length === 16
+              ? r.datetime
+              : (r.datetime || "").replace(" ", "T").slice(0, 16);
+            dateTimeGroup.input.value = iso;
+            dateTimeGroup.input.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          // Trigger the category suggestion pill refresh.
+          updateSuggestion();
+          const parts = [];
+          if (r.amount != null) parts.push(`₹${r.amount}`);
+          if (r.note) parts.push(`"${r.note}"`);
+          if (r.paymentMethod && r.paymentMethod !== "cash") parts.push(r.paymentMethod.replace("_", " "));
+          if (r.upiApp) parts.push(r.upiApp);
+          statusEl.textContent = r.amount != null
+            ? `Captured: ${parts.join(" · ")}`
+            : `Couldn't detect amount in "${r.transcript}". Try again.`;
+          active?.stop();
+          active = null;
+          setListening(false);
+        },
+        onError: (err) => {
+          statusEl.textContent = err.message;
+          active?.stop();
+          active = null;
+          setListening(false);
+        },
+        onEnd: () => {
+          if (active) {
+            active = null;
+            setListening(false);
+          }
+        },
+      });
+    });
+  }
 
   // --- Category -----------------------------------------------------------
   // Build the <select> from the categories list. If there are zero categories
@@ -91,7 +176,9 @@ export function buildExpenseForm({ categories, expense }) {
     categories.forEach((c) => {
       const opt = document.createElement("option");
       opt.value = c.id;
-      opt.textContent = c.name;
+      // Prefix the emoji when one is set, so the open dropdown shows it
+      // (browsers render emoji inside <option> text content).
+      opt.textContent = c.icon ? `${c.icon}  ${c.name}` : c.name;
       if (expense && expense.categoryId === c.id) opt.selected = true;
       catSelect.appendChild(opt);
     });
@@ -178,6 +265,81 @@ export function buildExpenseForm({ categories, expense }) {
   });
   form.appendChild(noteGroup.root);
 
+  // --- Receipt (encrypted attachment) -------------------------------------
+  // The file is encrypted client-side (XChaCha20-Poly1305 via blobs.mjs)
+  // BEFORE it leaves the device; only the ciphertext reaches the server.
+  // The blobId is stored on the expense record (metadata only).
+  const receiptField = document.createElement("div");
+  receiptField.className = "field";
+  receiptField.innerHTML = `
+    <label class="field__label" for="exp-receipt">Receipt (optional)</label>
+    <input class="field__input" id="exp-receipt" type="file"
+           accept="image/*,.pdf" />
+    <p class="muted receipt-hint" style="font-size:12px;margin:4px 0 0">
+      Encrypted on this device before upload. Max 10 MB.
+    </p>
+  `;
+  const receiptFileState = { file: null, existingBlobId: expense?.receiptBlobId || null };
+  receiptField.querySelector("#exp-receipt").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    receiptFileState.file = f || null;
+    const hint = receiptField.querySelector(".receipt-hint");
+    if (f) hint.textContent = `Ready to encrypt: ${f.name} (${(f.size / 1024).toFixed(0)} KB)`;
+    else hint.textContent = "Encrypted on this device before upload. Max 10 MB.";
+  });
+  form.appendChild(receiptField);
+
+  // --- Date & Time (combined field) --------------------------------------
+  // Replaces the previous separate Date + Time inputs. We still store the
+  // values as discrete `date` (YYYY-MM-DD) and `time` (HH:MM) on the
+  // expense record for compatibility with the server schema and the
+  // existing tests, but the user now sees and edits a single picker.
+  const dateTimeGroup = fieldGroup("Date & time", "datetime", "datetime-local", {
+    required: true,
+    value: combineDateTime(expense?.date, expense?.time),
+  });
+  form.appendChild(dateTimeGroup.root);
+  // Keep references to the underlying date / time values so the rest of
+  // the form (validation + readValues) can still address them by name.
+  const dateGroup = {
+    input: makeHiddenInput("date", expense?.date || todayISO()),
+    showError: (msg) => setFieldError("date", msg),
+  };
+  const timeGroup = {
+    input: makeHiddenInput("time", expense?.time || currentTimeHHMM()),
+    showError: (msg) => setFieldError("time", msg),
+  };
+  // Register the date/time error slots under their original field names
+  // so the live-validation handler (clearing errors as the user types)
+  // still works.
+  ERRORS.date = makeErrorEl("date");
+  ERRORS.time = makeErrorEl("time");
+  // Split the datetime-local value into date + time parts whenever the
+  // user changes it. <input type="datetime-local"> emits strings like
+  // "2026-08-13T14:30" which we parse apart for storage.
+  dateTimeGroup.input.addEventListener("input", () => {
+    const raw = dateTimeGroup.input.value; // "YYYY-MM-DDTHH:MM" or ""
+    if (!raw) {
+      dateGroup.input.value = "";
+      timeGroup.input.value = "";
+      return;
+    }
+    const [d, t] = raw.split("T");
+    dateGroup.input.value = d;
+    timeGroup.input.value = (t || "").slice(0, 5) || currentTimeHHMM();
+  });
+  // Pre-fill the hidden fields from the picker on first render so a fresh
+  // "Add" expense carries today's date + the current minute, even before
+  // the user touches the picker.
+  {
+    const raw = dateTimeGroup.input.value;
+    if (raw) {
+      const [d, t] = raw.split("T");
+      if (d) dateGroup.input.value = d;
+      if (t) timeGroup.input.value = t.slice(0, 5);
+    }
+  }
+
   // --- Inline category-suggest pill (Phase 4) ------------------------------
   // As the user types in the Note field, we look up a category via the
   // keyword map and show a "Category: Food [Use]" pill. Clicking "Use"
@@ -249,6 +411,9 @@ export function buildExpenseForm({ categories, expense }) {
   });
 
   // Expose a read() that returns either { ok, value } or { ok:false, errors }.
+  // Also exposes the receipt file state so the caller can encrypt + upload it
+  // (needs the master key, which the form itself must not touch).
+  form.receiptFile = receiptFileState;
   form.readValues = function readValues() {
     const data = {
       amount: amountGroup.input.value,
@@ -283,19 +448,20 @@ export function buildExpenseForm({ categories, expense }) {
     else setFieldError("note", "");
 
     if (Object.keys(errors).length) return { ok: false, errors };
-    return {
-      ok: true,
-      value: {
-        amount: amt.value,
-        date: dat.value,
-        time: tim.value,
-        categoryId: cat.value,
-        paymentMethod: pay.value,
-        // Only persist upiApp when the method is UPI.
-        upiApp: pay.value === "upi" ? upi.value : "",
-        note: note.value,
-      },
+    const value = {
+      amount: amt.value,
+      date: dat.value,
+      time: tim.value,
+      categoryId: cat.value,
+      paymentMethod: pay.value,
+      // Only persist upiApp when the method is UPI.
+      upiApp: pay.value === "upi" ? upi.value : "",
+      note: note.value,
     };
+    // Carry the existing receipt reference through edits (a new file is
+    // encrypted + uploaded by the caller; see main.js openExpenseForm).
+    if (receiptFileState.existingBlobId) value.receiptBlobId = receiptFileState.existingBlobId;
+    return { ok: true, value };
   };
 
   return form;
@@ -357,4 +523,29 @@ function fieldGroup(label, name, type, attrs) {
     setFieldError(name, message);
   }
   return { root, input, showError };
+}
+
+/**
+ * Combine a `date` (YYYY-MM-DD) and `time` (HH:MM) into the value an
+ * `<input type="datetime-local">` expects ("YYYY-MM-DDTHH:MM"). Falls back
+ * to "now" rounded to the minute when either part is absent.
+ */
+function combineDateTime(date, time) {
+  const d = date || todayISO();
+  const t = (time || currentTimeHHMM()).slice(0, 5);
+  return `${d}T${t}`;
+}
+
+/**
+ * Build a detached <input> that we keep around only so the rest of the
+ * form code (validation + readValues) can still reference `.value` under
+ * the original "date" / "time" field names. Hidden from layout + a11y
+ * tree because the user-facing picker is the datetime-local input above.
+ */
+function makeHiddenInput(name, value) {
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = name;
+  input.value = value;
+  return input;
 }

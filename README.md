@@ -1,4 +1,4 @@
-# Expense Tracker
+# XPENSIC
 
 A lightweight, single-user expense tracker that runs entirely in your
 browser. No build step, no backend, no install — just open `index.html`
@@ -18,9 +18,13 @@ and start tracking.
 - **Payment methods** — Cash / UPI / Debit card / Credit card / Bank transfer. UPI shows a sub-dropdown (PhonePe / Google Pay / Paytm).
 - **Budgets** — per-category monthly budgets with progress bars (yellow at 80%, red at 100%). "Copy from last month" makes setting up each month fast.
 - **Dashboard** — KPI cards (this-month total, vs. last month delta, daily average, today), category breakdown chart, recent expenses, and budget alerts that link to the Budgets view.
-- **Import / Export** — full-state JSON backup and round-trip-safe CSV of expenses. Excel and Google Sheets friendly.
+- **Import / Export** — full-state JSON backup and round-trip-safe CSV of expenses. The CSV opens directly in **Google Sheets** (File → Import → Upload) and **Microsoft Excel** (just double-click). No conversion needed.
+- **Account & multi-device** — sign up with email or 10-digit mobile + password; sign in on any device and your data is there. OTP sign-in (demo mode) for users who don't want to remember a password.
+- **Categories with icons** — every category has an emoji icon (🍔 Food, 🚗 Transport, 🏠 Housing, …). Custom categories get to pick from an icon grid.
 - **Theme** — light, dark, or follow system. No flash on load.
 - **Currency** — INR by default, but any ISO code with a custom symbol and position is supported. Indian digit grouping (`1,23,456.78`) is the default for INR.
+- **Voice entry** (Chrome / Edge) — say "Coffee 180" and the expense is captured with the right amount, date, and category suggestion.
+- **Expense splitter** — split bills with friends, trips, or roommates and see per-head amounts instantly.
 - **Keyboard shortcuts** — `n` to add, `/` to search, letters to navigate, `t` to cycle theme, `?` for the full help.
 
 ---
@@ -31,40 +35,56 @@ This is a static web app with no build step. You need a local HTTP server
 because ES modules don't load over `file://`.
 
 ```bash
-# Easiest: use the npm scripts
-npm run dev          # starts the custom dev server (see below)
-npm test             # runs the full test suite
+# Client only (offline / localStorage mode). Use this if you don't want
+# a server — but you won't get multi-device sign-in, OTP, or cloud backup.
+npm run dev          # starts the custom dev server on :8765
+
+# Full mode with auth + multi-device data sync. Requires the small
+# Node backend in ./server.
+cd server && npm install && npm start      # backend on :8787
+npm run dev                                # client on :8765
 
 # Or any other static server. This repo also ships a tiny custom one:
 node dev-server.cjs
 # then open http://127.0.0.1:8765/
-
-# Or use a third-party server:
-npx http-server -p 8765 -c-1
-python -m http.server 8765
 ```
 
-If you'd rather skip the server, you can drag `index.html` into a modern
-browser — but ES module imports and the `localStorage`-based persistence
-work best over `http://`.
+The backend defaults to `http://127.0.0.1:8787`. See
+[`server/README.md`](server/README.md) for the API, environment
+variables, and a `npm run smoke` test that boots the server in-process
+and exercises every route.
+
+If you'd rather skip the server entirely, you can drag `index.html`
+into a modern browser — but ES module imports and the auth flow work
+best over `http://`.
 
 ---
 
 ## Data
 
-Everything is stored in your browser's `localStorage` under the key
-`expense-tracker:v1`. There is **no server**. If you clear site data, use a
+When the backend is running, your data lives in a small JSON file on
+the server (see `server/expense-tracker.db.json`). `localStorage` is
+still used as an offline cache so the app stays usable when the
+backend is unreachable. Sign out wipes the local cache; signing in
+again reloads everything from the server.
+
+Without the backend (offline mode), everything stays in `localStorage`
+under the key `expense-tracker:v1`. If you clear site data, use a
 private window, or switch browsers, your data is gone unless you've
 exported a backup.
 
 ### Recommended backup workflow
 
 - **Weekly**: Export JSON from Settings → Data. Save the file somewhere
-  safe (cloud drive, email to yourself, version control).
-- **Before any big change**: Export JSON. The Merge/Replace dialog asks
-  for confirmation and shows the count of items in the backup.
-- **For Excel/Google Sheets**: Export CSV. The columns are stable and
-  round-trip safe.
+  safe (cloud drive, email to yourself, version control). JSON captures
+  **everything** — categories, expenses, budgets, profile.
+- **Before any big change**: Export JSON. The Replace dialog asks
+  for confirmation.
+- **For Excel / Google Sheets**: click *Export for Sheets/Excel (CSV)*
+  in Settings. The file is RFC 4180 CSV with a `.csv` extension and
+  a `text/csv` MIME type, so it opens with a double-click in Excel
+  and via *File → Import → Upload* in Google Sheets. Columns:
+  `id, date, time, amount, category, paymentMethod, upiApp, note`.
 
 ### Data model
 

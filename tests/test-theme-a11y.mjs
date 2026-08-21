@@ -44,15 +44,19 @@ check("updateThemeButton mirrors the current theme to data-theme",
   /setAttribute\("data-theme",\s*pref\)/.test(updateFn));
 
 console.log("\n[3] Settings theme buttons are exposed as a radio group");
-const settingsThemeBlock = main.split("--- Theme buttons ------------------------------------------------------")[1]?.split("--- Stats line")[0] || "";
+// The new main.js wires this up inline in the rendered HTML and a
+// setThemeActive() helper. Look across the full file (not a comment
+// block) so the assertion survives future restructuring.
 check("container is upgraded to role=radiogroup",
-  /setAttribute\("role",\s*"radiogroup"\)/.test(settingsThemeBlock));
+  /role="radiogroup"/.test(main) && /aria-label="Theme"/.test(main));
 check("each button gets role=radio",
-  /setAttribute\("role",\s*"radio"\)/.test(settingsThemeBlock));
+  /role="radio"[^>]*data-theme="light"/.test(main) &&
+  /role="radio"[^>]*data-theme="dark"/.test(main) &&
+  /role="radio"[^>]*data-theme="system"/.test(main));
 check("each button gets aria-checked reflecting the active theme",
-  /aria-checked/.test(settingsThemeBlock));
-check("renderThemeActive keeps aria-checked in sync after a click",
-  /b\.setAttribute\("aria-checked",\s*isActive\s*\?\s*"true"\s*:\s*"false"\)/.test(settingsThemeBlock));
+  /aria-checked="false"/.test(main));
+check("setThemeActive keeps aria-checked in sync after a click",
+  /aria-checked",\s*active\s*\?\s*"true"\s*:\s*"false"/.test(main));
 
 console.log("\n[4] index.html hides the visible label from screen readers");
 check("#theme-label has aria-hidden='true'", /id="theme-label"[^>]*aria-hidden="true"/.test(index));

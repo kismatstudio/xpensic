@@ -1,16 +1,30 @@
-// Entry point: hash-based router + view mounting + month picker + theme + store.
-// Phase 1: data layer (store) is wired; Settings has real controls for currency + theme.
-// Phase 2: expense CRUD — Add/Edit modal + Expenses list view + Dashboard "Add" button.
+// Entry point: hash-based router + view mounting + month picker + theme + auth.
+//
+// Auth model (since the backend landed):
+//   • On boot, we ask the server `/api/auth/whoami`. If the cookie is
+//     valid, we fetch the user's data blob and mount the app shell.
+//   • If the server is unreachable or the cookie is missing/invalid, we
+//     mount the login gate. The gate signs the user in and hands us a
+//     user object; we then fetch the data blob.
+//   • Every state mutation that previously called `Store.save(...)` now
+//     also pushes to the server via `syncToServer` (debounced 500ms).
+//     localStorage is still used as a write-through cache so reloads
+//     are instant and the app still works offline against the last
+//     known good blob.
 
-import { Store } from "./store.js";
+import { Store, migrate } from "./store.js";
 import { formatCurrency } from "./format.js";
 import { initTheme, cycleTheme, getThemePref, setTheme } from "./theme.js";
+import { initCursor } from "./cursor.js";
 import { renderExpenses as renderExpensesView } from "./views/expenses.js";
 import { renderDashboard as renderDashboardView } from "./views/dashboard.js";
 import { renderCategories as renderCategoriesView } from "./views/categories.js";
 import { renderBudgets as renderBudgetsView } from "./views/budgets.js";
 import { renderProfile as renderProfileView } from "./views/profile.js";
+import { renderSplits as renderSplitsView } from "./views/splits.js";
 import { mountLogin } from "./views/login.js";
+import { mountUnlock } from "./views/unlock.js";
+import { mountVaultSetup } from "./views/vault-setup.js";
 import { exportFullState, parseFullState, mergeState, downloadAsFile, readFileAsText } from "./backup.js";
 import { expensesToCSV, csvToExpenses } from "./csv.js";
 import { confirmDialog } from "./components/confirm.js";
@@ -23,47 +37,309 @@ import {
   startOfMonth, monthKey, formatMonth,
   formatIndianPhone, generateAvatarDataUrl,
 } from "./util.js";
+import { Auth, Data, Crypto, apiBase, ApiError, Expenses, Categories, Budgets, Settings, Splits } from "./api.js";
 
 // ---- Route table -----------------------------------------------------------
-// Each route maps to a title (for the document title) and a render function.
+
 const ROUTES = {
   profile:    { title: "Profile",    render: renderProfile    },
   dashboard:  { title: "Dashboard",  render: renderDashboard  },
   expenses:   { title: "Expenses",   render: renderExpenses   },
   budgets:    { title: "Budgets",    render: renderBudgets    },
   categories: { title: "Categories", render: renderCategories },
+  splits:     { title: "Splits",     render: renderSplits     },
   settings:   { title: "Settings",   render: renderSettings   },
 };
 const DEFAULT_ROUTE = "dashboard";
 
 // ---- Session state ---------------------------------------------------------
-// `state` is the mutable store object — views read it directly and call Store
-// helpers to mutate. Keeping it here (rather than in localStorage on every read)
-// makes the views fast and lets us re-render selectively.
+// `state` is the mutable in-memory blob. Views read it directly. Mutations
+// flow through Store helpers and trigger `syncToServer` (debounced).
 const session = {
-  storeResult: null,
   state: null,
   currentMonth: startOfMonth(new Date()),
+  firstRun: false,
+  serverOnline: true,
 };
 
-// ---- Date helpers ----------------------------------------------------------
-// (startOfMonth, formatMonth, monthKey all live in util.js — imported above.)
+// ---- Server sync -----------------------------------------------------------
+// Smart diff sync: instead of pushing the whole blob on every mutation,
+// we diff the current state against `lastKnownServerState` and fire
+// per-resource API calls only for what changed.
+//
+//   • Expense added/edited/deleted → POST/PUT/DELETE /api/expenses/:id
+//   • Category added/edited/deleted → POST/PUT/DELETE /api/categories/:id
+//   • Budgets changed → PUT /api/budgets (whole-blob replace)
+//   • Settings changed → PUT /api/settings (merge patch)
+//   • Profile changed → PATCH /api/auth/profile
+//   • Split added/edited/deleted   → POST/PUT/DELETE /api/splits/:id
+//
+// Every `Store.save(...)` from any view automatically fires a sync via
+// the listener registered below — callers don't need to remember to
+// call syncToServer() themselves.
+let syncTimer = null;
+let syncPending = false;
 
-// Pull the route name out of the URL hash, falling back to the default route.
+// The last server-confirmed state. Initialised after GET /api/data on
+// boot and updated after every successful per-resource push. We diff
+// against this to know what to send.
+let lastKnownServerState = null;
+
+function syncToServer() {
+  syncPending = true;
+  if (syncTimer) return;
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    if (!syncPending) return;
+    syncPending = false;
+    flushSync();
+  }, 500);
+}
+
+// Expose syncToServer on window so other views (e.g. the Splits view)
+// can force an immediate flush after a mutation instead of waiting
+// for the 500ms debounce. Also makes the function visible in dev
+// tools for debugging.
+if (typeof window !== "undefined") {
+  window.syncToServer = syncToServer;
+}
+
+// Wire Store.save → syncToServer. Registering once at boot covers every
+// view (expenses, budgets, categories, profile, splits, dashboard).
+Store.onSave(() => syncToServer());
+
+async function flushSync() {
+  if (!session.state || !session.state.profile?.userId) return;
+  if (!lastKnownServerState) {
+    // Haven't hydrated yet — nothing to diff against. Skip; the boot
+    // hydration will set lastKnownServerState and subsequent saves will
+    // sync normally.
+    return;
+  }
+  const userId = session.state.profile.userId;
+  const diffs = computeDiffs(lastKnownServerState, session.state);
+  if (diffs.length === 0) return;
+  // eslint-disable-next-line no-console
+  console.log("[sync] flushing", diffs.length, "op(s):", diffs.map((o) => o.type).join(", "));
+  let allOk = true;
+  for (const op of diffs) {
+    try {
+      await executeOp(userId, op);
+    } catch (err) {
+      allOk = false;
+      // eslint-disable-next-line no-console
+      console.warn(`[sync] ${op.type} failed:`, err?.message || err, err?.status);
+    }
+  }
+  if (allOk) {
+    // Update the known state to match what we just pushed.
+    lastKnownServerState = JSON.parse(JSON.stringify(session.state));
+    // Mirror the new state into the encrypted vault so a fresh
+    // device can decrypt everything on first unlock. Best-effort —
+    // if the vault write fails (vault locked, server down, etc.)
+    // the per-resource sync above already kept the server in sync.
+    try {
+      const { saveVault } = await import("./crypto/vault-sync.mjs");
+      await saveVault(session.state);
+    } catch (e) {
+      console.warn("[sync] vault mirror failed:", e?.message || e);
+    }
+    setServerOnline(true);
+  } else {
+    setServerOnline(false, new Error("Some sync operations failed"));
+  }
+}
+
+/** Alias used by tests + signOut. The per-resource flush above also
+ *  mirrors the encrypted vault, so this is the canonical "flush all
+ *  pending sync" entry point. */
+async function flushVaultSync() {
+  return flushSync();
+}
+
+/**
+ * Compute the list of per-resource operations needed to bring the
+ * server from `prev` to `cur`. Returns an array of op descriptors.
+ */
+function computeDiffs(prev, cur) {
+  const ops = [];
+  if (!prev || !cur) return ops;
+
+  // --- Expenses ---
+  const prevExp = new Map((prev.expenses || []).map((e) => [e.id, e]));
+  for (const e of (cur.expenses || [])) {
+    const old = prevExp.get(e.id);
+    if (!old) {
+      ops.push({ type: "expense-create", expense: e });
+    } else if (JSON.stringify(old) !== JSON.stringify(e)) {
+      ops.push({ type: "expense-update", id: e.id, expense: e });
+    }
+    prevExp.delete(e.id);
+  }
+  for (const e of prevExp.values()) {
+    ops.push({ type: "expense-delete", id: e.id });
+  }
+
+  // --- Categories ---
+  const prevCat = new Map((prev.categories || []).map((c) => [c.id, c]));
+  for (const c of (cur.categories || [])) {
+    const old = prevCat.get(c.id);
+    if (!old) {
+      ops.push({ type: "category-create", category: c });
+    } else if (JSON.stringify(old) !== JSON.stringify(c)) {
+      ops.push({ type: "category-update", id: c.id, category: c });
+    }
+    prevCat.delete(c.id);
+  }
+  for (const c of prevCat.values()) {
+    ops.push({ type: "category-delete", id: c.id });
+  }
+
+  // --- Splits ---
+  // Splits are stored as self-contained JSON blobs (with userId
+  // denormalised onto the row), so we strip that field before
+  // comparing so the equality check isn't fooled by transient writes.
+  const stripSplit = (s) => {
+    if (!s) return s;
+    const { userId, ...rest } = s;
+    return rest;
+  };
+  const prevSplits = new Map((prev.splits || []).map((s) => [s.id, stripSplit(s)]));
+  for (const s of (cur.splits || [])) {
+    const old = prevSplits.get(s.id);
+    const next = stripSplit(s);
+    if (!old) {
+      ops.push({ type: "split-create", split: s });
+    } else if (JSON.stringify(old) !== JSON.stringify(next)) {
+      ops.push({ type: "split-update", id: s.id, split: s });
+    }
+    prevSplits.delete(s.id);
+  }
+  for (const s of prevSplits.values()) {
+    ops.push({ type: "split-delete", id: s.id });
+  }
+
+  // --- Budgets (whole-blob replace) ---
+  if (JSON.stringify(prev.budgets || {}) !== JSON.stringify(cur.budgets || {})) {
+    ops.push({ type: "budgets-put", budgets: cur.budgets || { monthly: {} } });
+  }
+
+  // --- Settings (merge patch) ---
+  const prevSet = prev.settings || {};
+  const curSet = cur.settings || {};
+  const settingsChanged = Object.keys({ ...prevSet, ...curSet }).some(
+    (k) => prevSet[k] !== curSet[k]
+  );
+  if (settingsChanged) {
+    ops.push({ type: "settings-put", patch: { ...curSet } });
+  }
+
+  // --- Profile (name / phone / avatar / loginDays) ---
+  // loginDays lives at the top level of state (not inside .profile),
+  // but it's user-scoped metadata that belongs on the user record.
+  // We diff it here so the server stays in sync with the streak
+  // counter — without this, the server never learns about new login
+  // days and the streak fails to persist across devices.
+  const prevProf = prev.profile || {};
+  const curProf = cur.profile || {};
+  const profilePatch = {};
+  for (const k of ["name", "phone", "avatarDataUrl"]) {
+    if (prevProf[k] !== curProf[k]) profilePatch[k] = curProf[k];
+  }
+  const prevDays = JSON.stringify(Array.isArray(prev.loginDays) ? prev.loginDays : []);
+  const curDays  = JSON.stringify(Array.isArray(cur.loginDays)  ? cur.loginDays  : []);
+  if (prevDays !== curDays) {
+    profilePatch.loginDays = Array.isArray(cur.loginDays) ? cur.loginDays : [];
+  }
+  if (Object.keys(profilePatch).length > 0) {
+    ops.push({ type: "profile-patch", patch: profilePatch });
+  }
+
+  return ops;
+}
+
+async function executeOp(userId, op) {
+  switch (op.type) {
+    case "expense-create":
+      await Expenses.create({ ...op.expense, userId });
+      break;
+    case "expense-update":
+      await Expenses.update(op.id, { ...op.expense, userId });
+      break;
+    case "expense-delete":
+      await Expenses.remove(op.id);
+      break;
+    case "category-create":
+      await Categories.create({ ...op.category, userId });
+      break;
+    case "category-update":
+      await Categories.update(op.id, { ...op.category, userId });
+      break;
+    case "category-delete":
+      await Categories.remove(op.id);
+      break;
+    case "budgets-put":
+      await Budgets.put(op.budgets);
+      break;
+    case "settings-put":
+      await Settings.put(op.patch);
+      break;
+    case "profile-patch":
+      await Auth.updateProfile(op.patch);
+      break;
+    case "split-create":
+      // Splits are stored as a JSON blob that already carries userId /
+      // id; we forward everything as-is.
+      // eslint-disable-next-line no-console
+      console.log("[sync] split-create → POST /api/splits", { id: op.split.id, title: op.split.title });
+      await Splits.create({ ...op.split, userId });
+      break;
+    case "split-update":
+      // eslint-disable-next-line no-console
+      console.log("[sync] split-update → PUT /api/splits/" + op.id);
+      await Splits.update(op.id, { ...op.split, userId });
+      break;
+    case "split-delete":
+      // eslint-disable-next-line no-console
+      console.log("[sync] split-delete → DELETE /api/splits/" + op.id);
+      await Splits.remove(op.id);
+      break;
+    default:
+      // eslint-disable-next-line no-console
+      console.warn("[sync] unknown op type:", op.type);
+  }
+}
+
+function setServerOnline(online, err) {
+  if (session.serverOnline === online) return;
+  session.serverOnline = online;
+  if (online) {
+    toast("Back online — saved to server", "success");
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn("server sync failed:", err);
+    toast(
+      "Couldn't reach the server (" + (err?.message || "offline") +
+        "). Changes saved locally and will retry.",
+      "error",
+      5000
+    );
+  }
+}
+
+// ---- Date helpers ----------------------------------------------------------
+
 function getRouteFromHash() {
   const raw = (window.location.hash || "").replace(/^#\/?/, "");
   return ROUTES[raw] ? raw : DEFAULT_ROUTE;
 }
 
-// Highlight the active link in the sidebar/top-tab nav.
 function setActiveNav(route) {
   document.querySelectorAll(".nav-link").forEach((el) => {
     el.classList.toggle("is-active", el.dataset.route === route);
   });
 }
 
-// Renders the profile section at the top of the nav drawer (avatar + name
-// + phone). Cheap; called on boot and after the profile is edited.
 function renderNavProfile() {
   const host = document.getElementById("app-nav-profile");
   if (!host) return;
@@ -71,49 +347,97 @@ function renderNavProfile() {
   const avatar = p.avatarDataUrl || generateAvatarDataUrl(p);
   const phoneDisplay = formatIndianPhone(p.phone) || "";
   const name = p.name || "—";
+  // The drawer mirrors the top of the Profile screen (avatar + name + phone)
+  // and adds a signout affordance right beneath it so the user can leave
+  // the session without having to drill into the Profile view. The
+  // button is a tertiary-style ghost inside the same bordered card so it
+  // doesn't compete with the primary nav links below.
+  //
+  // The drawer also carries an XPENSIC brand block at the very top of
+  // the profile section so the empty space above the user info isn't
+  // wasted and the app identity is reinforced on every navigation.
   host.innerHTML = `
-    <a class="app-nav__profile-link" href="#/profile" data-route="profile">
-      <img class="app-nav__profile-avatar" src="${escapeHtml(avatar)}" alt="" />
-      <div class="app-nav__profile-id">
-        <div class="app-nav__profile-name">${escapeHtml(name)}</div>
-        ${phoneDisplay ? `<div class="app-nav__profile-phone">${escapeHtml(phoneDisplay)}</div>` : ""}
+    <div class="app-nav__brand">
+      <!-- Drawer brand: full lockup (mark + wordmark + tagline) on
+           one logical line. The tagline wraps to a second line on
+           narrow drawers so the full sentence is always visible
+           without horizontal scrolling. The wordmark uses a tighter
+           size than the header so the three pieces fit within the
+           248px drawer width comfortably, and the mark sits a touch
+           larger so the lockup has visual weight against the menu
+           items below. -->
+      <img
+        class="app-nav__brand-mark app-nav__brand-mark--light"
+        src="assets/brand/mark-light.png"
+        alt=""
+        aria-hidden="true"
+        width="40"
+        height="40"
+      />
+      <img
+        class="app-nav__brand-mark app-nav__brand-mark--dark"
+        src="assets/brand/mark-dark.png"
+        alt=""
+        aria-hidden="true"
+        width="40"
+        height="40"
+      />
+      <div class="app-nav__brand-type">
+        <div class="app-nav__brand-wordmark">Xpensic</div>
+        <div class="app-nav__brand-tagline">Track expenses. Take control.</div>
       </div>
-    </a>
+    </div>
+    <div class="app-nav__profile-card">
+      <a class="app-nav__profile-link" href="#/profile" data-route="profile">
+        <img class="app-nav__profile-avatar" src="${escapeHtml(avatar)}" alt="" />
+        <div class="app-nav__profile-id">
+          <div class="app-nav__profile-name">${escapeHtml(name)}</div>
+          ${phoneDisplay ? `<div class="app-nav__profile-phone">${escapeHtml(phoneDisplay)}</div>` : ""}
+        </div>
+      </a>
+      <button class="app-nav__signout" type="button" id="app-nav-signout" aria-label="Sign out">
+        <span class="app-nav__signout-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </span>
+        <span class="app-nav__signout-label">Sign out</span>
+      </button>
+    </div>
   `;
   host.querySelector(".app-nav__profile-link")?.classList.toggle(
     "is-active",
     getRouteFromHash() === "profile",
   );
+  // Wire the signout button. The handler is created lazily so it's never
+  // attached before the app shell is mounted (and so it doesn't fire
+  // during the gate's mount).
+  const signoutBtn = host.querySelector("#app-nav-signout");
+  if (signoutBtn) {
+    signoutBtn.addEventListener("click", () => signOut());
+  }
 }
 
-// Clear the view container and re-render the current route.
 function render() {
   const route = getRouteFromHash();
   const view = ROUTES[route];
   const container = document.getElementById("view");
   setActiveNav(route);
   renderNavProfile();
-  document.title = `${view.title} · Expense Tracker`;
+  document.title = `${view.title} · XPENSIC`;
   container.innerHTML = "";
   view.render(container);
 }
 
-// ---- Theme button (Light / Dark / System cycle) ---------------------------
+// ---- Theme -----------------------------------------------------------------
 
 const THEME_LABEL = { light: "Light", dark: "Dark", system: "System" };
 const THEME_ICON  = { light: "☀", dark: "☾", system: "◐" };
-// Click order: light → dark → system → light. We use this to tell the
-// user (via aria-label) what the next click will do, so screen-reader
-// users can predict the result without trial and error.
 const THEME_CYCLE_ORDER = ["light", "dark", "system"];
 const nextTheme = (pref) => THEME_CYCLE_ORDER[(THEME_CYCLE_ORDER.indexOf(pref) + 1) % THEME_CYCLE_ORDER.length];
 
-// Sync the header button's label/icon/aria with the current preference.
-// The button is a 3-state cycle, so aria-pressed (binary) doesn't fit;
-// instead we name the current state in the aria-label and say what the
-// next click will do. We also mirror the active state as a data-theme
-// attribute so CSS can react to it (e.g. for an outline on the active
-// theme's icon).
 function updateThemeButton() {
   const pref = getThemePref();
   const btn = document.getElementById("theme-toggle");
@@ -130,15 +454,18 @@ function updateThemeButton() {
 
 // ---- Header mounts ---------------------------------------------------------
 
-// Month picker: ‹ / › buttons. Emits a `monthchange` event so other views
-// (Dashboard, future charts) can react without a global pub/sub.
 function mountMonthPicker() {
   const label = document.getElementById("month-label");
   const prev = document.getElementById("month-prev");
   const next = document.getElementById("month-next");
 
+  // Both the header label AND the active view need to refresh when the
+  // month changes (Dashboard KPIs / chart / recent, Expenses filters,
+  // Budgets month list). Re-render the view in place so the URL and
+  // scroll position are preserved.
   const update = () => {
     label.textContent = formatMonth(session.currentMonth);
+    render();
     document.dispatchEvent(
       new CustomEvent("monthchange", { detail: { monthKey: monthKey(session.currentMonth) } }),
     );
@@ -160,12 +487,11 @@ function mountMonthPicker() {
     update();
   });
 
-  update();
+  // Initial label render only — the full `render()` already happened
+  // during mountAppShell, so we don't need to re-render the view here.
+  label.textContent = formatMonth(session.currentMonth);
 }
 
-// Nav toggle. The drawer is a slide-out on every screen size — the
-// hamburger button is always visible and the drawer overlays the app
-// with a translucent scrim. Closes on link tap, scrim click, or Escape.
 function mountNavToggle() {
   const btn = document.querySelector(".nav-toggle");
   const nav = document.getElementById("app-nav");
@@ -200,18 +526,19 @@ function mountNavToggle() {
     else openDrawer();
   });
 
-  // Tapping any nav link closes the drawer.
   nav.addEventListener("click", (e) => {
-    if (e.target.closest(".nav-link") || e.target.closest(".app-nav__profile-link")) {
+    // Close the drawer whenever the user activates any link OR the
+    // signout button — the nav is a transient surface and shouldn't
+    // stay open while the user is being navigated or signed out.
+    if (e.target.closest(".nav-link") ||
+        e.target.closest(".app-nav__profile-link") ||
+        e.target.closest(".app-nav__signout")) {
       closeDrawer();
     }
   });
 
-  // Scrim click closes the drawer.
   scrim?.addEventListener("click", closeDrawer);
 
-  // Escape closes the drawer — but not while typing in an input or
-  // while another modal is open (Escape is reserved for those).
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && btn.getAttribute("aria-expanded") === "true") {
       const t = e.target;
@@ -221,17 +548,16 @@ function mountNavToggle() {
   });
 }
 
-// Header theme button: cycles Light → Dark → System and persists the choice.
 function mountThemeToggle() {
   const btn = document.getElementById("theme-toggle");
   if (!btn) return;
   btn.addEventListener("click", () => {
     cycleTheme();
-    // Mirror the choice into the settings store so it survives a reload even
-    // if the user later clears the theme-only localStorage key.
     const pref = getThemePref();
     Store.updateSettings(session.state, { theme: pref });
+    // Persist via the standard path (localStorage + server).
     Store.save(session.state);
+    syncToServer();
     updateThemeButton();
   });
   updateThemeButton();
@@ -239,27 +565,19 @@ function mountThemeToggle() {
 
 // ---- Views -----------------------------------------------------------------
 
-// Dashboard — Phase 4: Quick Add, KPI grid, category chart, recent expenses,
-// budget alerts panel. The view is large enough that it lives in
-// `views/dashboard.js`; this wrapper just hands it the shared session
-// and a callback to refresh on any change.
 function renderDashboard(container) {
   renderDashboardView(container, {
     state: session.state,
     session,
     openAddExpenseModal,
-    // re-render the dashboard in-place after an add/edit/delete
     refresh: () => render(),
   });
 }
 
-// Expenses list — delegated to the dedicated view module.
 function renderExpenses(container) {
-  renderExpensesView(container, { state: session.state });
+  renderExpensesView(container, { state: session.state, refresh: () => render() });
 }
 
-// Budgets — Phase 6: per-category monthly budgets with progress bars, copy
-// from last month, and live dashboard alerts.
 function renderBudgets(container) {
   renderBudgetsView(container, {
     state: session.state,
@@ -268,9 +586,6 @@ function renderBudgets(container) {
   });
 }
 
-// Categories — Phase 5: full CRUD (add / rename / recolor / reassign-on-delete).
-// The view is in `views/categories.js`; this wrapper passes it the shared
-// state and a refresh callback.
 function renderCategories(container) {
   renderCategoriesView(container, {
     state: session.state,
@@ -278,7 +593,14 @@ function renderCategories(container) {
   });
 }
 
-// Profile — full Profile screen accessible from the drawer.
+function renderSplits(container) {
+  renderSplitsView(container, {
+    state: session.state,
+    refresh: () => render(),
+  });
+}
+
+
 function renderProfile(container) {
   renderProfileView(container, {
     state: session.state,
@@ -288,7 +610,6 @@ function renderProfile(container) {
   });
 }
 
-// Settings — currency, date format, theme. All persist live to the store.
 function renderSettings(container) {
   const { state } = session;
   const s = state.settings;
@@ -346,10 +667,10 @@ function renderSettings(container) {
   themeCard.innerHTML = `
     <div class="card__title">Appearance</div>
     <div class="card__subtitle">Choose how the app looks. The header button cycles Light → Dark → System.</div>
-    <div class="theme-options" role="group" aria-label="Theme">
-      <button class="theme-options__btn" type="button" data-theme="light">☀ Light</button>
-      <button class="theme-options__btn" type="button" data-theme="dark">☾ Dark</button>
-      <button class="theme-options__btn" type="button" data-theme="system">◐ System</button>
+    <div class="theme-options" role="radiogroup" aria-label="Theme">
+      <button class="theme-options__btn" type="button" role="radio" data-theme="light" aria-checked="false">☀ Light</button>
+      <button class="theme-options__btn" type="button" role="radio" data-theme="dark" aria-checked="false">☾ Dark</button>
+      <button class="theme-options__btn" type="button" role="radio" data-theme="system" aria-checked="false">◐ System</button>
     </div>
   `;
   wrap.appendChild(themeCard);
@@ -360,130 +681,125 @@ function renderSettings(container) {
   dataCard.innerHTML = `
     <div class="card__title">Data</div>
     <div class="card__subtitle">
-      Everything lives in this browser. Back up regularly — clearing site
-      data will erase your expenses, categories, and budgets.
+      Back up your data as JSON (full state) or CSV (expenses only, Google
+      Sheets / Excel friendly).
     </div>
-    <div class="muted" id="set-stats" style="margin-bottom: var(--space-3)"></div>
-
     <div class="data-actions">
-      <div class="data-actions__group">
-        <div class="data-actions__heading">Full backup (JSON)</div>
-        <div class="data-actions__hint muted">Includes settings, categories, expenses, and budgets.</div>
-        <div class="data-actions__buttons">
-          <button class="btn btn--primary" type="button" id="data-export-json">Export JSON</button>
-          <button class="btn" type="button" id="data-import-json">Import JSON</button>
-          <input type="file" id="data-import-json-input" accept="application/json,.json" style="display:none" />
-        </div>
-      </div>
-
-      <div class="data-actions__group">
-        <div class="data-actions__heading">Expenses (CSV)</div>
-        <div class="data-actions__hint muted">Round-trip safe; open in Excel or Google Sheets.</div>
-        <div class="data-actions__buttons">
-          <button class="btn btn--primary" type="button" id="data-export-csv">Export CSV</button>
-          <button class="btn" type="button" id="data-import-csv">Import CSV</button>
-          <input type="file" id="data-import-csv-input" accept=".csv,text/csv" style="display:none" />
-        </div>
-      </div>
-
-      <div class="data-actions__group data-actions__group--danger">
-        <div class="data-actions__heading">Danger zone</div>
-        <div class="data-actions__hint muted">Wipes all data in this browser. There is no undo.</div>
-        <div class="data-actions__buttons">
-          <button class="btn btn--danger" type="button" id="data-erase">Erase all data…</button>
-        </div>
-      </div>
+      <button class="btn" id="data-export-json" type="button">Export full backup (JSON)</button>
+      <button class="btn" id="data-import-json" type="button">Import backup (JSON)</button>
+      <input type="file" id="data-import-json-input" accept="application/json,.json" hidden />
+      <button class="btn" id="data-export-csv" type="button">Export for Sheets/Excel (CSV)</button>
+      <button class="btn" id="data-import-csv" type="button">Import CSV</button>
+      <input type="file" id="data-import-csv-input" accept=".csv,text/csv" hidden />
     </div>
   `;
   wrap.appendChild(dataCard);
 
+  // --- Account card -------------------------------------------------------
+  const acctCard = document.createElement("div");
+  acctCard.className = "card";
+  acctCard.style.marginTop = "var(--space-4)";
+  acctCard.innerHTML = `
+    <div class="card__title">Account</div>
+    <div class="card__subtitle">
+      Your data lives on the server at <code>${escapeHtml(apiBase)}</code>.
+      Sign out to clear this device's local cache.
+    </div>
+    <div class="data-actions">
+      <button class="btn" id="acct-sync" type="button">Sync now</button>
+      <button class="btn btn--danger" id="acct-signout" type="button">Sign out</button>
+    </div>
+  `;
+  wrap.appendChild(acctCard);
+
+  // --- Danger card (wipe server data) ------------------------------------
+  const dangerCard = document.createElement("div");
+  dangerCard.className = "card";
+  dangerCard.style.marginTop = "var(--space-4)";
+  dangerCard.innerHTML = `
+    <div class="card__title" style="color:var(--color-danger)">Danger zone</div>
+    <div class="card__subtitle">
+      Permanently erase your data on the server. This cannot be undone —
+      export a backup first if you want to keep anything.
+    </div>
+    <div class="field" style="margin-top:var(--space-2)">
+      <label class="field__label" for="danger-confirm">
+        Type <strong>ERASE</strong> to confirm
+      </label>
+      <input class="field__input" id="danger-confirm" type="text" />
+      <div class="field__error" id="danger-confirm-error" hidden></div>
+    </div>
+    <div class="data-actions">
+      <button class="btn btn--danger" id="danger-erase" type="button" disabled>Erase all server data</button>
+    </div>
+  `;
+  wrap.appendChild(dangerCard);
+
   container.appendChild(wrap);
 
-  // --- Hydrate controls from current state --------------------------------
-  const $code = currencyCard.querySelector("#set-currency");
+  // --- Currency wiring ---------------------------------------------------
+  const $currency = currencyCard.querySelector("#set-currency");
   const $symbol = currencyCard.querySelector("#set-symbol");
   const $pos = currencyCard.querySelector("#set-pos");
   const $date = currencyCard.querySelector("#set-date");
   const $preview = currencyCard.querySelector("#set-preview");
-  $code.value = s.currency;
-  $symbol.value = s.currencySymbol;
-  $pos.value = s.currencyPosition;
-  $date.value = s.dateFormat;
 
-  // Re-render the preview using whatever the controls currently say.
+  $currency.value = s.currency || "INR";
+  $symbol.value = s.currencySymbol || "₹";
+  $pos.value = s.currencyPosition || "before";
+  $date.value = s.dateFormat || "YYYY-MM-DD";
+
   const updatePreview = () => {
-    $preview.textContent = formatCurrency(1234.5, {
-      currency: $code.value,
-      currencySymbol: $symbol.value || $code.value,
+    const settings = {
+      currency: $currency.value,
+      currencySymbol: $symbol.value,
       currencyPosition: $pos.value,
-    });
+      dateFormat: $date.value,
+    };
+    $preview.textContent = formatCurrency(1234.5, settings);
   };
   updatePreview();
 
-  // Tracks whether the symbol is still the auto-synced default for the
-  // current currency — once the user edits it manually, stop overwriting.
-  let symbolAutoSynced = true;
-  $symbol.addEventListener("input", () => { symbolAutoSynced = false; });
-
-  // Persist the current control values into the store.
   const persistSettings = () => {
     Store.updateSettings(state, {
-      currency: $code.value,
+      currency: $currency.value,
       currencySymbol: $symbol.value,
       currencyPosition: $pos.value,
       dateFormat: $date.value,
     });
     Store.save(state);
+    syncToServer();
     updatePreview();
+    render();
   };
-
-  $code.addEventListener("change", () => {
-    const SYMBOLS = { INR: "₹", USD: "$", EUR: "€", GBP: "£", JPY: "¥" };
-    // Only auto-replace the symbol if the user hasn't customized it yet.
-    if (symbolAutoSynced) $symbol.value = SYMBOLS[$code.value] ?? $code.value;
-    persistSettings();
-    toast("Settings saved", "success");
+  [$currency, $symbol, $pos, $date].forEach((el) => {
+    el.addEventListener("change", persistSettings);
   });
-  $symbol.addEventListener("input", persistSettings);
-  $pos.addEventListener("change", () => { persistSettings(); toast("Settings saved", "success"); });
-  $date.addEventListener("change", () => { persistSettings(); toast("Settings saved", "success"); });
 
-  // --- Theme buttons ------------------------------------------------------
-  // These are a mutually-exclusive group, so we expose them as a real
-  // radio group: the container is role="radiogroup" and each button is
-  // role="radio" with aria-checked reflecting the active theme. The
-  // visible "is-active" class continues to drive the visual highlight.
-  themeCard.querySelector(".theme-options")?.setAttribute("role", "radiogroup");
-  themeCard.querySelectorAll("[data-theme]").forEach((b) => {
-    b.setAttribute("role", "radio");
-    b.setAttribute("aria-checked", b.dataset.theme === getThemePref() ? "true" : "false");
-  });
-  function renderThemeActive() {
-    const pref = getThemePref();
-    themeCard.querySelectorAll("[data-theme]").forEach((b) => {
-      const isActive = b.dataset.theme === pref;
-      b.classList.toggle("is-active", isActive);
-      b.setAttribute("aria-checked", isActive ? "true" : "false");
+  // --- Theme wiring ------------------------------------------------------
+  function setThemeActive(theme) {
+    themeCard.querySelectorAll(".theme-options__btn").forEach((b) => {
+      const active = b.dataset.theme === theme;
+      b.classList.toggle("is-active", active);
+      b.setAttribute("aria-checked", active ? "true" : "false");
     });
   }
-  themeCard.querySelectorAll("[data-theme]").forEach((btn) => {
+  setThemeActive(state.settings?.theme || "system");
+  themeCard.querySelectorAll(".theme-options__btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      setTheme(btn.dataset.theme);
-      Store.updateSettings(state, { theme: btn.dataset.theme });
+      const pref = btn.dataset.theme;
+      Store.updateSettings(state, { theme: pref });
+      setTheme(pref);
       Store.save(state);
+      syncToServer();
+      setThemeActive(pref);
       updateThemeButton();
-      renderThemeActive();
+      // Don't re-render the whole settings view — that would steal
+      // focus from the button we just clicked.
     });
   });
-  renderThemeActive();
 
-  // --- Stats line ---------------------------------------------------------
-  dataCard.querySelector("#set-stats").textContent =
-    `${state.expenses.length} expenses · ${state.categories.length} categories · schema v${state.version}`;
-
-  // --- Data: JSON export --------------------------------------------------
-  // Writes a pretty-printed JSON file with the current state. The filename
-  // includes the date so consecutive backups don't overwrite each other.
+  // --- Data wiring -------------------------------------------------------
   dataCard.querySelector("#data-export-json").addEventListener("click", () => {
     const json = exportFullState(state);
     const filename = `expense-tracker-${todayISO()}.json`;
@@ -491,83 +807,37 @@ function renderSettings(container) {
     toast("Backup downloaded", "success");
   });
 
-  // --- Data: JSON import --------------------------------------------------
-  // The hidden <input type="file"> is clicked by the visible button so the
-  // browser shows the standard file picker. On selection we read the file
-  // and ask the user to merge or replace.
-  const $importJsonInput = dataCard.querySelector("#data-import-json-input");
-  dataCard.querySelector("#data-import-json").addEventListener("click", () => {
-    $importJsonInput.click();
-  });
-  $importJsonInput.addEventListener("change", async (ev) => {
+  const $importInput = dataCard.querySelector("#data-import-json-input");
+  dataCard.querySelector("#data-import-json").addEventListener("click", () => $importInput.click());
+  $importInput.addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0];
     if (!file) return;
     try {
       const text = await readFileAsText(file);
       const result = parseFullState(text);
       if (!result.ok) {
-        toast(result.error, "error");
+        toast(result.error || "Could not parse JSON.", "error");
         return;
       }
-      const incoming = result.state;
-      const counts = `${incoming.expenses.length} expenses, ${incoming.categories.length} categories`;
-      // Ask Merge vs Replace vs Cancel. openModal is callback-based, so
-      // we wrap it in a Promise to keep this handler readable.
-      const choice = await new Promise((resolve) => {
-        openModal({
-          title: "Import backup?",
-          body: `
-            <p style="margin: 0 0 var(--space-3) 0;">
-              Found <strong>${escapeHtml(counts)}</strong> in
-              <strong>${escapeHtml(file.name)}</strong>.
-            </p>
-            <p class="muted" style="margin: 0; font-size: var(--text-sm)">
-              <strong>Merge</strong> adds new items without touching your current data.<br/>
-              <strong>Replace</strong> wipes your current data and uses the backup as-is.
-            </p>
-          `,
-          actions: [
-            { label: "Cancel", value: "cancel", kind: "default" },
-            { label: "Merge", value: "merge", kind: "primary" },
-            { label: "Replace", value: "replace", kind: "danger" },
-          ],
-          onAction: (v) => { resolve(v); return true; },
-        });
+      const ok = await confirmDialog({
+        title: "Import backup?",
+        message: `Replace your current data with this backup? This will overwrite categories, expenses, and budgets.`,
+        confirmLabel: "Replace",
+        danger: true,
       });
-      if (choice === "cancel" || choice === false) return;
-      if (choice === "replace") {
-        // Wholesale swap: take the backup as the new state. We preserve
-        // the user's theme preference so the UI doesn't get flipped.
-        const themePref = state.settings.theme;
-        Object.assign(state, incoming);
-        state.settings.theme = themePref;
-        Store.save(state);
-        toast(`Restored backup (${incoming.expenses.length} expenses)`, "success");
-      } else {
-        // Merge: add categories/expenses/budgets that aren't already present.
-        const merged = mergeState(state, incoming);
-        Object.assign(state, merged);
-        Store.save(state);
-        const added = merged.expenses.length - state.expenses.length;
-        // (Sanity: state and merged should be the same object after Object.assign.)
-        const addedExpenses = (incoming.expenses || []).filter(
-          (e) => !state.expenses.some((x) => x.id === e.id)
-        ).length;
-        toast(
-          `Merged ${addedExpenses} new expense${addedExpenses === 1 ? "" : "s"}`,
-          "success",
-        );
-      }
+      if (!ok) return;
+      mergeState(state, result.state);
+      Store.save(state);
+      syncToServer();
+      toast("Backup imported", "success");
       render();
     } catch (e) {
       toast("Could not read file: " + (e.message || e), "error");
     } finally {
-      // Clear so picking the same file again still fires "change".
       ev.target.value = "";
     }
   });
 
-  // --- Data: CSV export ---------------------------------------------------
   dataCard.querySelector("#data-export-csv").addEventListener("click", () => {
     if (state.expenses.length === 0) {
       toast("No expenses to export", "error");
@@ -576,10 +846,9 @@ function renderSettings(container) {
     const csv = expensesToCSV(state.expenses, state.categories);
     const filename = `expenses-${todayISO()}.csv`;
     downloadAsFile(filename, csv, "text/csv");
-    toast(`Exported ${state.expenses.length} expenses`, "success");
+    toast(`Exported ${state.expenses.length} expenses (open in Google Sheets / Excel)`, "success", 4500);
   });
 
-  // --- Data: CSV import ---------------------------------------------------
   const $importCsvInput = dataCard.querySelector("#data-import-csv-input");
   dataCard.querySelector("#data-import-csv").addEventListener("click", () => {
     $importCsvInput.click();
@@ -591,40 +860,25 @@ function renderSettings(container) {
       const text = await readFileAsText(file);
       const result = csvToExpenses(text, state.categories);
       if (!result.ok && result.expenses.length === 0) {
-        // Hard failure — show the first error and bail.
         toast(result.errors[0]?.message || "Could not parse CSV.", "error");
         return;
       }
-      // Soft failure (some rows had errors) — confirm before importing the good ones.
       if (result.errors.length > 0) {
         const ok = await confirmDialog({
           title: "Some rows had errors",
-          message: `${result.expenses.length} row(s) look good, ${result.errors.length} had problems and will be skipped. Continue?`,
-          confirmLabel: `Import ${result.expenses.length} row(s)`,
+          message: `${result.expenses.length} rows look good; ${result.errors.length} had errors. Import the good ones anyway?`,
+          confirmLabel: "Import good rows",
         });
         if (!ok) return;
       }
-      // Apply: dedupe by id so a re-import of the same CSV is a no-op.
-      // The CSV writer emits the `id` column for every row, so two parses
-      // of the same file produce the same ids; without this check every
-      // re-import would double the user's data.
-      const existingIds = new Set(state.expenses.map((e) => e.id));
       let added = 0;
-      let skipped = 0;
-      for (const e of result.expenses) {
-        // Rows without an id (e.g. a hand-edited CSV) always go in; the
-        // store generates a fresh id for them.
-        if (e.id && existingIds.has(e.id)) {
-          skipped++;
-          continue;
-        }
+      result.expenses.forEach((e) => {
         Store.addExpense(state, e);
-        if (e.id) existingIds.add(e.id);
         added++;
-      }
+      });
       Store.save(state);
-      const skipTail = skipped > 0 ? ` · ${skipped} skipped (already imported)` : "";
-      toast(`Imported ${added} expense${added === 1 ? "" : "s"}${skipTail}`, "success");
+      syncToServer();
+      toast(`Imported ${added} expenses`, "success");
       render();
     } catch (e) {
       toast("Could not read file: " + (e.message || e), "error");
@@ -633,99 +887,119 @@ function renderSettings(container) {
     }
   });
 
-  // --- Data: Erase all ---------------------------------------------------
-  dataCard.querySelector("#data-erase").addEventListener("click", async () => {
-    const ok = await confirmDialog({
-      title: "Erase all data?",
-      message: "This deletes every expense, category, and budget in this browser. There is no undo. Consider exporting a JSON backup first.",
-      confirmLabel: "Erase everything",
-      cancelLabel: "Keep my data",
-      danger: true,
-    });
-    if (!ok) return;
-    Store.reset();
-    // Re-apply the user's theme preference on top of the freshly-seeded
-    // settings (Store.reset() creates a new state object, so any in-memory
-    // reference is now stale — re-render to pick up the new state).
-    session.state = JSON.parse(localStorage.getItem(Store.STORAGE_KEY));
-    render();
-    toast("All data erased", "success");
+  // --- Account wiring ----------------------------------------------------
+  acctCard.querySelector("#acct-sync").addEventListener("click", async () => {
+    try {
+      await flushSync();
+      toast("Synced", "success");
+    } catch (err) {
+      toast("Sync failed: " + (err?.message || "unknown"), "error");
+    }
+  });
+  acctCard.querySelector("#acct-signout").addEventListener("click", () => signOut());
+
+  // --- Danger wiring -----------------------------------------------------
+  const $confirm = dangerCard.querySelector("#danger-confirm");
+  const $err = dangerCard.querySelector("#danger-confirm-error");
+  const $erase = dangerCard.querySelector("#danger-erase");
+  $confirm.addEventListener("input", () => {
+    const ok = $confirm.value.trim() === "ERASE";
+    $erase.disabled = !ok;
+    $err.hidden = ok || !$confirm.value;
+    $err.textContent = ok || !$confirm.value ? "" : "Type ERASE (uppercase) to enable.";
+  });
+  $erase.addEventListener("click", async () => {
+    try {
+      // Erase per-resource: delete all expenses + categories + splits,
+      // reset budgets + settings. PUT /api/data is gone, so we fan out.
+      const exps = session.state.expenses || [];
+      for (const e of exps) {
+        try { await Expenses.remove(e.id); } catch { /* ignore */ }
+      }
+      const cats = (session.state.categories || []).filter((c) => !c.isDefault);
+      for (const c of cats) {
+        try { await Categories.remove(c.id); } catch { /* ignore */ }
+      }
+      const splits = session.state.splits || [];
+      for (const s of splits) {
+        try { await Splits.remove(s.id); } catch { /* ignore */ }
+      }
+      try { await Budgets.put({ monthly: {} }); } catch { /* ignore */ }
+      Store.clearTopLevelData(session.state);
+      Store.save(session.state);
+      lastKnownServerState = JSON.parse(JSON.stringify(session.state));
+      toast("All server data erased", "success");
+      render();
+    } catch (err) {
+      toast("Could not erase: " + (err?.message || "unknown"), "error");
+    }
   });
 }
 
-// Shared placeholder card for views that aren't implemented yet.
-function placeholder(title, body) {
-  const el = document.createElement("div");
-  el.innerHTML = `
-    <h1 class="section-title">${escapeHtml(title)}</h1>
-    <div class="placeholder">
-      <div class="placeholder__title">Coming in a later phase</div>
-      <div>${body}</div>
-    </div>
-  `;
-  return el;
+// ---- Expense modal (shared by Dashboard + Expenses) ------------------------
+
+function openAddExpenseModal() {
+  openExpenseForm({ state: session.state });
 }
 
-// ---- Shared Add-Expense modal opener --------------------------------------
-// Used by the Dashboard's "Add" button. The Expenses view uses its own
-// equivalent so it can re-render the table after a save.
-function openAddExpenseModal() {
-  const form = buildExpenseForm({ categories: session.state.categories });
+function openEditExpenseModal(id) {
+  const exp = session.state.expenses.find((e) => e.id === id);
+  if (!exp) return;
+  openExpenseForm({ state: session.state, expense: exp });
+}
+
+function openExpenseForm({ state, expense }) {
+  const form = buildExpenseForm({
+    categories: state.categories,
+    expense: expense || null,
+  });
   openModal({
-    title: "Add expense",
+    title: expense ? "Edit expense" : "Add expense",
     body: form,
     actions: [
       { label: "Cancel", value: false, kind: "default" },
-      { label: "Add expense", value: true, kind: "primary" },
+      { label: expense ? "Save" : "Add", value: true, kind: "primary" },
     ],
     onAction: (value) => {
-      if (!value) return true;        // Cancel — close the modal
+      if (!value) return true;
       const result = form.readValues();
-      if (!result.ok) return false;   // Invalid — keep the modal open
-      Store.addExpense(session.state, result.value);
-      Store.save(session.state);
-      toast("Expense added", "success");
-      // Re-render the current view so totals / tables reflect the new row.
+      if (!result.ok) {
+        // Validation errors already rendered inside the form.
+        return false;
+      }
+      if (expense) {
+        Store.updateExpense(state, expense.id, result.value);
+      } else {
+        Store.addExpense(state, result.value);
+      }
+      Store.save(state);
+      syncToServer();
+      toast(expense ? "Expense updated" : "Expense added", "success");
       render();
       return true;
     },
   });
 }
 
-// Sign out — stashes the current per-user data into the registry, clears
-// the active profile + the top-level data fields, and puts the app back
-// behind the auth gate. The user's data and the registered profile entry
-// are preserved so the same person can sign back in later.
-function signOut() {
-  const prevUserId = session.state.profile && session.state.profile.userId;
-  // Snapshot the active profile's data into the registry before clearing
-  // the top-level slots. Without this, signing out and back in would
-  // show an empty app.
-  if (prevUserId) {
-    Store.snapshotPerUserData(session.state, prevUserId);
-  }
+// ---- Sign out --------------------------------------------------------------
+
+async function signOut() {
+  // Flush any pending writes before we lose the session.
+  if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; syncPending = false; }
+  try { await flushSync(); } catch { /* ignore — we're signing out anyway */ }
+  try { await Auth.signout(); } catch { /* even if the server is down, clear locally */ }
   Store.updateProfile(session.state, { userId: "", name: "", phone: "", avatarDataUrl: "" });
   Store.clearTopLevelData(session.state);
   Store.save(session.state);
   toast("Signed out", "success");
-  // Reset the route silently to dashboard. We use history.replaceState
-  // (not `window.location.hash =`) because the latter fires a `hashchange`
-  // event, which would re-render the current view against the just-cleared
-  // profile before bootLoginGate() can mount the gate — producing a visible
-  // flash of the app shell with an empty profile. replaceState changes the
-  // URL without firing the event, so the gate covers everything cleanly.
   if (window.location.hash !== "#/dashboard") {
     history.replaceState(null, "", "#/dashboard");
   }
-  // Re-show the gate. Now called synchronously, so there's no window
-  // where the user can see the app shell rendered with an empty profile.
   bootLoginGate();
 }
 
-// Mounts the app shell (header, nav, theme, keyboard shortcuts, route
-// rendering). Called from bootLoginGate in both the "already signed in"
-// and "just finished the gate" paths. Fires the one-time first-run
-// welcome toast the first time it runs after a brand-new install.
+// ---- App shell + boot ------------------------------------------------------
+
 function mountAppShell() {
   document.body.classList.remove("app-locked");
   mountMonthPicker();
@@ -740,67 +1014,220 @@ function mountAppShell() {
         const pref = getThemePref();
         Store.updateSettings(session.state, { theme: pref });
         Store.save(session.state);
+        syncToServer();
         updateThemeButton();
       },
     },
   );
   window.addEventListener("hashchange", render);
   render();
-  // One-time first-run welcome. We fire it after the app shell is up so
-  // the user actually sees the toast (otherwise the gate would swallow it).
-  // Hot-reloads don't re-fire it because we clear the flag immediately.
+
   if (session.firstRun) {
     const name = (session.state.profile && session.state.profile.name) || "";
-    const greeting = name ? `Welcome, ${name}!` : "Welcome to Expense Tracker!";
+    const greeting = name ? `Welcome, ${name}!` : "Welcome to XPENSIC!";
     toast(greeting, "success", 4000);
     session.firstRun = false;
   }
 }
 
-// Mounts the login gate if there's no profile, then mounts the app.
 function bootLoginGate() {
-  const profile = session.state.profile;
-  if (profile && profile.userId && profile.phone) {
-    // Already signed in — show the app shell directly.
-    mountAppShell();
-    return;
-  }
-  // Hide the hamburger / app shell so the user can't see the app behind the
-  // gate. We keep the app shell in the DOM so it can show instantly on login.
   document.body.classList.add("app-locked");
   mountLogin({
-    state: session.state,
-    onComplete: () => {
-      mountAppShell();
+    onComplete: ({ user, justSignedUp }) => {
+      // Adopt the server's user identity locally. We don't touch
+      // any of the user data yet — the E2EE unlock flow is the
+      // source of truth, and it loads the encrypted vault next.
+      session.state.profile = {
+        userId: user.userId,
+        name: user.name || "",
+        phone: user.phone || "",
+        avatarDataUrl: user.avatarDataUrl || "",
+      };
+      session.firstRun = justSignedUp;
+      // Branch on whether the user has any wraps. If they do, send
+      // them through the unlock screen (password or recovery phrase).
+      // If they don't, this is a brand-new account and we walk them
+      // through the vault-setup wizard (pick a master password, opt
+      // into a recovery phrase, etc).
+      bootUnlockOrSetup({ user, justSignedUp });
     },
   });
 }
 
+/**
+ * Decide whether the signed-in user has an existing encrypted vault
+ * (unlock flow) or needs to set one up (first-time flow). Both
+ * flows end with `onUnlocked(state)` which we use to mount the app
+ * shell. Decoupled from `bootLoginGate` so the whoami path can
+ * reuse it without re-mounting the login gate.
+ */
+async function bootUnlockOrSetup({ user, justSignedUp }) {
+  let wraps = [];
+  try {
+    // Crypto.getMasterKey normalises the server response into an
+    // array of { wrapType, envelope, createdAt } objects. We check
+    // Array.isArray directly — unwrapping `res.wraps` here would
+    // always be undefined because the API client already did the
+    // extraction.
+    const res = await Crypto.getMasterKey();
+    wraps = Array.isArray(res) ? res : [];
+  } catch (err) {
+    // The crypto endpoint may not be live (older server, network
+    // glitch). Fall through with empty wraps so we either set up
+    // a fresh vault or surface a clear error.
+    console.warn("[boot] master-key fetch failed:", err?.message || err);
+  }
+  if (wraps.length > 0) {
+    // Returning user — send them through the unlock screen.
+    mountUnlock({
+      profile: { name: user.name || "", userId: user.userId },
+      onUnlocked: (state) => afterUnlock(state, { justSignedUp }),
+    });
+  } else {
+    // Brand-new account — walk them through the vault setup wizard.
+    mountVaultSetup({
+      profile: { name: user.name || "", userId: user.userId, phone: user.phone || "", avatarDataUrl: user.avatarDataUrl || "" },
+      onComplete: (state) => afterUnlock(state, { justSignedUp, freshVault: true }),
+    });
+  }
+}
+
+/**
+ * Common post-unlock path. Hydrates the in-memory state from the
+ * vault, records today's login day, persists to localStorage, and
+ * mounts the app shell.
+ */
+function afterUnlock(state, { justSignedUp = false, freshVault = false } = {}) {
+  session.state = state;
+  if (!Array.isArray(session.state.loginDays)) session.state.loginDays = [];
+  Store.recordLoginDay(session.state, todayISO());
+  Store.save(session.state);
+  session.firstRun = justSignedUp || freshVault;
+  if (freshVault) {
+    toast("Your encrypted vault is ready.", "success", 3500);
+  }
+  // Push the new login day to the server (via the profile patch path).
+  syncToServer();
+  mountAppShell();
+}
+
+async function hydrateFromServer() {
+  try {
+    const res = await Data.get();
+    // Normalize the server blob to the current schema the client expects.
+    // The server already seeds fresh users at SCHEMA_VERSION, but be
+    // defensive — older accounts in the DB may be on v5.
+    let raw = res.data || {};
+    // Backfill required top-level fields before running migration so
+    // validate() inside Store doesn't reject the blob.
+    if (typeof raw.version !== "number") raw.version = 5;
+    if (!Array.isArray(raw.categories)) raw.categories = [];
+    if (!Array.isArray(raw.expenses)) raw.expenses = [];
+    if (!Array.isArray(raw.splits)) raw.splits = [];
+    if (!raw.budgets || typeof raw.budgets !== "object") raw.budgets = { monthly: {} };
+    if (!raw.settings || typeof raw.settings !== "object") raw.settings = Store.DEFAULT_SETTINGS;
+    if (!isPlainObject(raw.profile)) {
+      raw.profile = { userId: "", name: "", phone: "", avatarDataUrl: "" };
+    }
+    if (!isPlainObject(raw.profiles)) raw.profiles = {};
+    // CRITICAL: run the schema migration so v5 server blobs get the new
+    // default categories (Food & Dining, Internet & Mobile, Travel, etc.)
+    // added on the client side. Without this call the UI keeps showing
+    // the old 8-category list because the server returns the user's
+    // pre-upgrade blob verbatim.
+    raw = migrate(raw);
+    // Make sure the profile reflects the signed-in user (the server's
+    // blob may not have the latest name/avatar from a recent update).
+    raw.profile = {
+      ...raw.profile,
+      userId: session.state.profile.userId,
+      name: session.state.profile.name,
+      phone: session.state.profile.phone,
+      avatarDataUrl: session.state.profile.avatarDataUrl,
+    };
+    session.state = raw;
+    Store.save(session.state);
+    // Snapshot the hydrated state so the diff sync knows what the server
+    // already has — subsequent mutations only push what actually changed.
+    lastKnownServerState = JSON.parse(JSON.stringify(raw));
+    setServerOnline(true);
+  } catch (err) {
+    setServerOnline(false, err);
+    throw err;
+  }
+}
+
+// Tiny inline polyfill of isPlainObject so we don't have to import the
+// store module just for one helper. Keeps `migrate` happy.
+function isPlainObject(v) {
+  return v && typeof v === "object" && !Array.isArray(v);
+}
+
 // ---- Bootstrap -------------------------------------------------------------
-// Order matters: load the store, apply theme, then either show the login
-// gate or mount the UI.
-function init() {
-  session.storeResult = Store.load();
-  session.state = session.storeResult.state;
-  // `firstRun` is true only when Store.load() seeded a brand-new state
-  // from scratch (no existing localStorage, no errors). We use it to
-  // fire a one-time "Welcome!" toast right after the user lands on the
-  // app shell — the gate hides the app until login, so the toast
-  // naturally waits for the first successful sign-in.
-  session.firstRun = session.storeResult.ok === true && session.storeResult.seeded === true;
-  if (!session.storeResult.ok) {
-    // Non-fatal — the app still runs with a fresh state. Surface in the console.
-    console.warn("Store load issue:", session.storeResult.error);
-  }
 
+async function init() {
+  // Boot the theme immediately so the page doesn't flash white.
   initTheme();
-  if (session.state.settings.theme) {
-    setTheme(session.state.settings.theme);
-  }
-  updateThemeButton();
 
-  // Gate the app on profile. If a profile exists, mount the app shell;
-  // otherwise the gate handles the mount on completion.
+  // Boot the custom cursor (fine-pointer devices only). Adds a small
+  // black dot + smooth trailing ring that scales on hoverable elements.
+  initCursor();
+
+  // Session-expired watchdog. When the API layer detects that both the
+  // access token AND the refresh token are dead (server restart, manual
+  // sign-out on another device, etc), it dispatches this event. We
+  // flush any pending local writes, clear the profile, and bounce the
+  // user back to the login gate with a clear toast. Without this, the
+  // user is stranded on the dashboard with a 401 storm in the console
+  // and no UI affordance to recover.
+  window.addEventListener("xpensic:session-expired", () => {
+    if (session.state?.profile?.userId === "") return; // already signed out
+    toast("Your session expired — please sign in again.", "info", 5000);
+    // Persist any local state the user added offline so it's not lost.
+    try { Store.save(session.state); } catch { /* ignore */ }
+    Store.updateProfile(session.state, { userId: "", name: "", phone: "", avatarDataUrl: "" });
+    bootLoginGate();
+  });
+
+  // Seed an in-memory state from localStorage as a cache / offline fallback.
+  const cache = Store.load();
+  session.state = cache.state;
+  if (!cache.ok) {
+    console.warn("Store load issue:", cache.error);
+  }
+
+  // Ask the server if we're already signed in (cookie-based session).
+  try {
+    const me = await Auth.whoami();
+    if (me?.user) {
+      // Returning user. We need to unwrap their master key from
+      // one of their stored wraps (password or recovery phrase)
+      // before we can decrypt the vault. Hand off to the same
+      // unlock / setup flow that fresh sign-ins use.
+      session.state.profile = {
+        userId: me.user.userId,
+        name: me.user.displayName || "",
+        phone: me.user.phone || "",
+        avatarDataUrl: me.user.avatarDataUrl || session.state.profile.avatarDataUrl,
+      };
+      bootUnlockOrSetup({ user: { ...me.user, name: me.user.displayName || "" }, justSignedUp: false });
+      return;
+    }
+  } catch (err) {
+    // Server unreachable or cookie missing — either way, gate the app.
+    // eslint-disable-next-line no-console
+    console.warn("whoami failed:", err);
+    if (err instanceof ApiError && err.status === 0) {
+      toast(
+        "Can't reach the server at " + apiBase + ". Start it with `cd server && npm start`.",
+        "error",
+        6000
+      );
+    }
+  }
+
+  if (session.state.settings?.theme) setTheme(session.state.settings.theme);
+  updateThemeButton();
   bootLoginGate();
 }
 

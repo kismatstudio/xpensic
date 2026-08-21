@@ -1,11 +1,7 @@
-/* App shell layout */
-body {
-  font-family: var(--font-sans);
-  font-size: var(--text-base);
-  color: var(--color-text);
-  background: var(--color-bg);
-  transition: background-color 150ms ease, color 150ms ease;
-}
+/* ────────────────────────────────────────────────────────────────────────
+   Xpensic — App shell layout
+   Glass header, glass nav drawer, glass main container.
+   ──────────────────────────────────────────────────────────────────────── */
 
 .app {
   display: grid;
@@ -15,53 +11,136 @@ body {
     "header"
     "main";
   min-height: 100dvh;
+  position: relative;
 }
 
+/* ─── Header ──────────────────────────────────────────────────────────── */
 .app-header {
   grid-area: header;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 0 var(--space-4);
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  padding: 0 var(--space-5);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border-bottom: 1px solid var(--glass-border);
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 30;
+  transition: background var(--dur-med) var(--ease-out),
+              border-color var(--dur-med) var(--ease-out);
 }
 
-.app-header__spacer {
-  flex: 1;
-}
+.app-header__spacer { flex: 1; }
 
+/* Brand — the new XPENSIC lockup. The X+arrow mark comes from a
+   cropped PNG (assets/brand/mark-light.png and mark-dark.png). The
+   "Xpensic" wordmark and "Track expenses. Take control." tagline are
+   rendered as live HTML so the tagline stays editable and renders
+   with the same crisp typography the rest of the UI uses. */
 .app-brand {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
-  font-weight: 600;
+  /* Slight negative margin so the wider lockup sits flush with the
+     hamburger icon on the left without crowding the month picker. */
+  margin-left: calc(-1 * var(--space-1));
+  gap: var(--space-3);
+  transition: transform var(--dur-med) var(--ease-spring);
+  text-decoration: none;
+  color: var(--color-text);
 }
 
+.app-brand:hover {
+  transform: scale(1.02);
+}
+
+/* Show the right mark for the active theme. By default both variants
+   are present in the DOM so the browser pre-decodes the inactive one
+   and the swap is instant the moment data-theme flips. */
+[data-theme="light"] .app-brand__mark--dark,
+.app-brand__mark--dark {
+  display: none;
+}
+[data-theme="light"] .app-brand__mark--light {
+  display: block;
+}
+[data-theme="dark"] .app-brand__mark--light,
+.app-brand__mark--light {
+  display: none;
+}
+[data-theme="dark"] .app-brand__mark--dark {
+  display: block;
+}
+
+/* X+arrow mark. Slightly larger than the previous 38px tile so it
+   reads at a glance and matches the visual weight of the wordmark. */
 .app-brand__mark {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  font-weight: 700;
+  width: 52px;
+  height: 52px;
+  display: block;
+  flex: 0 0 auto;
+  /* Subtle glow + crisp-rendering hint. */
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.18));
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 
-.app-brand__name {
-  font-size: var(--text-md);
+/* Stacked wordmark + tagline. */
+.app-brand__type {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1;
 }
 
-/* Hamburger icon — three thin horizontal bars */
+.app-brand__wordmark {
+  font-family: var(--font-display, "Poppins"), "Inter", system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  /* Brand navy on light theme, white on dark theme. */
+  color: var(--brand-wordmark, #0F172A);
+}
+
+.app-brand__tagline {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--brand-tagline, #475569);
+  opacity: 0.85;
+}
+
+/* Theme-aware colors. Using CSS custom properties so the wordmark
+   stays readable in both themes without overriding the whole `color`
+   chain. */
+[data-theme="dark"] .app-brand__wordmark {
+  color: #F8FAFC;
+}
+[data-theme="dark"] .app-brand__tagline {
+  color: #94A3B8;
+}
+
+/* Intermediate breakpoints so the lockup stays balanced across
+   tablet + phone widths. On phones we drop the tagline so the
+   wordmark + mark still fit comfortably. */
+@media (max-width: 720px) {
+  .app-brand__mark { width: 44px; height: 44px; }
+  .app-brand__wordmark { font-size: 19px; }
+  .app-brand__tagline { font-size: 10px; }
+}
+@media (max-width: 480px) {
+  .app-brand__tagline { display: none; }
+  .app-brand__mark { width: 40px; height: 40px; }
+  .app-brand__wordmark { font-size: 18px; }
+}
+
+/* ─── Hamburger icon ──────────────────────────────────────────────────── */
 .icon-btn__bars {
   display: inline-flex;
   flex-direction: column;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   width: 18px;
   height: 14px;
 }
@@ -70,21 +149,21 @@ body {
   width: 18px;
   height: 2px;
   background: currentColor;
-  border-radius: 1px;
-  transition: transform 150ms ease, opacity 150ms ease;
+  border-radius: 2px;
+  transition: transform var(--dur-med) var(--ease-out),
+              opacity var(--dur-med) var(--ease-out);
 }
-/* When the drawer is open, morph the bars into an "x". */
 .nav-toggle[aria-expanded="true"] .icon-btn__bars > span:nth-child(1) {
-  transform: translateY(6px) rotate(45deg);
+  transform: translateY(7px) rotate(45deg);
 }
 .nav-toggle[aria-expanded="true"] .icon-btn__bars > span:nth-child(2) {
   opacity: 0;
 }
 .nav-toggle[aria-expanded="true"] .icon-btn__bars > span:nth-child(3) {
-  transform: translateY(-6px) rotate(-45deg);
+  transform: translateY(-7px) rotate(-45deg);
 }
 
-/* Nav drawer — slides in from the left, overlays the app on every screen size */
+/* ─── Nav drawer ──────────────────────────────────────────────────────── */
 .app-nav {
   position: fixed;
   top: 0;
@@ -92,16 +171,18 @@ body {
   bottom: 0;
   width: var(--nav-w);
   max-width: 86vw;
-  background: var(--color-surface);
-  border-right: 1px solid var(--color-border);
-  padding: var(--space-4) var(--space-3);
+  background: var(--glass-bg-strong);
+  -webkit-backdrop-filter: var(--glass-blur-strong);
+  backdrop-filter: var(--glass-blur-strong);
+  border-right: 1px solid var(--glass-border);
+  padding: calc(var(--header-h) + var(--space-3)) var(--space-3) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
   z-index: 50;
   transform: translateX(-100%);
-  transition: transform 200ms ease;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  transition: transform var(--dur-slow) var(--ease-out);
+  box-shadow: var(--shadow-lg);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -110,33 +191,141 @@ body {
 }
 
 .app-nav__profile {
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--glass-border);
   margin-bottom: var(--space-1);
+}
+
+/* XPENSIC drawer brand — full lockup that fills the top of the
+   drawer. The mark sits on the left, the wordmark + tagline stack
+   to its right. Sized to feel anchored (not floating) at the top of
+   the menu, with generous vertical padding so the menu list below
+   has clear breathing room. The wordmark + tagline are always both
+   visible (the tagline is the brand's voice, not a decorative
+   flourish), and the tagline wraps to a second line on narrow
+   drawers so the full sentence is never truncated. */
+.app-nav__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Generous top padding so the brand doesn't sit pinned under the
+     drawer header strip; bottom padding sized to leave visual
+     breathing room above the divider. */
+  padding: var(--space-5) var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.app-nav__brand-mark {
+  /* Slightly larger than the header mark — the drawer is the
+     "branded" surface, so the lockup needs more visual weight. */
+  width: 48px;
+  height: 48px;
+  display: block;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.18));
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+}
+
+/* Theme-aware visibility swap, same pattern as the header. */
+[data-theme="light"] .app-nav__brand-mark--dark,
+.app-nav__brand-mark--dark {
+  display: none;
+}
+[data-theme="light"] .app-nav__brand-mark--light {
+  display: block;
+}
+[data-theme="dark"] .app-nav__brand-mark--light,
+.app-nav__brand-mark--light {
+  display: none;
+}
+[data-theme="dark"] .app-nav__brand-mark--dark {
+  display: block;
+}
+
+/* Stacked wordmark + tagline. Wordmark is the primary read; tagline
+   sits below at a smaller, lighter weight for hierarchy. The
+   container takes the remaining width (mark is flex: 0 0 auto) so
+   the wordmark can grow into the available space. */
+.app-nav__brand-type {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.15;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.app-nav__brand-wordmark {
+  font-family: var(--font-display, "Poppins"), "Inter", system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  color: var(--brand-wordmark, #0F172A);
+  line-height: 1;
+}
+
+.app-nav__brand-tagline {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--brand-tagline, #475569);
+  opacity: 0.85;
+  /* Allow the tagline to wrap on narrow drawers — never truncate. */
+  line-height: 1.25;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+[data-theme="dark"] .app-nav__brand-wordmark {
+  color: #F8FAFC;
+}
+[data-theme="dark"] .app-nav__brand-tagline {
+  color: #94A3B8;
+}
+
+/* On the very narrowest drawers, shrink the mark + wordmark so
+   the brand never pushes the profile card out of view. The tagline
+   keeps its full width because wrapping handles it gracefully. */
+@media (max-width: 320px) {
+  .app-nav__brand-mark { width: 40px; height: 40px; }
+  .app-nav__brand-wordmark { font-size: 19px; }
+  .app-nav__brand-tagline { font-size: 10px; }
+}
+.app-nav__profile-card {
+  /* Wraps the profile link + signout button together so they share
+     padding/visual rhythm without leaking layout into the surrounding
+     nav shell. The element is a plain block — no border of its own —
+     because the parent `.app-nav__profile` already carries the divider. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 .app-nav__profile-link {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   color: var(--color-text);
   text-decoration: none;
-  transition: background 120ms ease;
+  transition: background var(--dur-med) var(--ease-out);
 }
 .app-nav__profile-link:hover {
-  background: var(--color-surface-2);
+  background: var(--glass-bg-soft);
 }
 .app-nav__profile-link.is-active {
   background: var(--color-primary-soft);
 }
 .app-nav__profile-avatar {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: var(--color-surface-2);
   flex: 0 0 auto;
   object-fit: cover;
+  border: 2px solid var(--glass-border-strong);
 }
 .app-nav__profile-id {
   min-width: 0;
@@ -158,6 +347,62 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Signout button — sits in the same card as the profile link, full-width
+   beneath the user info. Tertiary "ghost" style so it doesn't compete
+   with the primary nav links below. The icon is a small exit glyph that
+   inherits the muted text colour. */
+.app-nav__signout {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 8px var(--space-3);
+  margin-top: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-med) var(--ease-out),
+              color var(--dur-med) var(--ease-out),
+              border-color var(--dur-med) var(--ease-out);
+  text-align: left;
+}
+.app-nav__signout:hover,
+.app-nav__signout:focus-visible {
+  background: var(--color-danger-soft, rgba(239, 68, 68, 0.12));
+  color: var(--color-danger, #ef4444);
+  border-color: var(--color-danger, #ef4444);
+  outline: none;
+}
+.app-nav__signout:active {
+  transform: translateY(0.5px);
+}
+.app-nav__signout-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: inherit;
+}
+.app-nav__signout-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.app-nav__signout-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .nav-list {
   display: flex;
   flex-direction: column;
@@ -165,70 +410,99 @@ body {
 }
 
 .nav-link {
-  display: block;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   font-weight: 500;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background var(--dur-med) var(--ease-out),
+              color var(--dur-med) var(--ease-out),
+              transform var(--dur-med) var(--ease-out);
+  position: relative;
 }
-
+.nav-link::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--color-primary);
+  border-radius: 0 4px 4px 0;
+  opacity: 0;
+  transform: scaleY(0.5);
+  transition: opacity var(--dur-med) var(--ease-out),
+              transform var(--dur-med) var(--ease-out);
+}
 .nav-link:hover {
-  background: var(--color-surface-2);
+  background: var(--glass-bg-soft);
   color: var(--color-text);
+  transform: translateX(2px);
 }
-
 .nav-link.is-active {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-text);
+}
+.nav-link.is-active::before {
+  opacity: 1;
+  transform: scaleY(1);
 }
 
-/* The "Profile" item in the list mirrors the profile-chip and gets a
-   subtle outline so the user understands it leads to the same place. */
-.nav-link--profile {
-  display: none; /* Profile link is the chip; no need to duplicate in the list */
-}
+.nav-link--profile { display: none; }
 
 .app-nav__footer {
   margin-top: auto;
   color: var(--color-text-muted);
+  padding: var(--space-2);
+  border-top: 1px solid var(--glass-border);
 }
 
-/* Scrim — dimmed overlay behind the drawer. Hidden by default. */
+/* ─── Scrim ───────────────────────────────────────────────────────────── */
 .nav-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   z-index: 40;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 200ms ease;
+  transition: opacity var(--dur-med) var(--ease-out);
 }
 .nav-scrim.is-open {
   opacity: 1;
   pointer-events: auto;
 }
 
+/* ─── Main + view container ───────────────────────────────────────────── */
 .app-main {
   grid-area: main;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-5);
+  padding: var(--space-5) var(--space-5) calc(var(--space-7) + 80px);
+  scroll-behavior: smooth;
 }
 
-.app-main:focus {
-  outline: none;
-}
+.app-main:focus { outline: none; }
 
 .view {
   max-width: var(--content-max);
   margin: 0 auto;
+  animation: view-fade-in var(--dur-med) var(--ease-out);
 }
 
+@keyframes view-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Toast region ────────────────────────────────────────────────────── */
 .toast-region {
   position: fixed;
-  inset: auto var(--space-4) var(--space-4) auto;
+  inset: auto var(--space-5) var(--space-5) auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -236,31 +510,11 @@ body {
   pointer-events: none;
 }
 
-.skip-link {
-  position: absolute;
-  left: -9999px;
-  top: 0;
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-}
+/* ─── Lock screen ─────────────────────────────────────────────────────── */
+body.app-locked .app { display: none; }
 
-.skip-link:focus {
-  left: var(--space-2);
-  top: var(--space-2);
-  z-index: 1000;
-}
-
-/* When the app is locked behind the login gate, hide the hamburger and
-   the rest of the shell so the user sees only the gate. */
-body.app-locked .app {
-  display: none;
-}
-
-/* Narrow screens: tighten the main padding. */
+/* ─── Mobile layout tightening ────────────────────────────────────────── */
 @media (max-width: 720px) {
-  .app-main {
-    padding: var(--space-4);
-  }
+  .app-main { padding: var(--space-4) var(--space-4) 100px; }
+  .app-header { padding: 0 var(--space-4); }
 }

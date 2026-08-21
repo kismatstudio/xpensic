@@ -81,6 +81,7 @@ export function renderCategories(container, { state, refresh }) {
     return `
       <li class="cat-list__item cat-list__row" data-id="${c.id}">
         <span class="cat-swatch" style="background:${c.color}"></span>
+        ${c.icon ? `<span class="cat-icon" aria-hidden="true">${escapeHtml(c.icon)}</span>` : ""}
         <span class="cat-list__name">
           ${escapeHtml(c.name)}
           ${c.isDefault ? `<span class="muted" style="font-size:var(--text-xs); margin-left:6px">default</span>` : ""}
@@ -132,8 +133,8 @@ export function renderCategories(container, { state, refresh }) {
       if (!name) {
         toast("Category name is required", "error");
         return;
-      }
-      Store.updateCategory(state, id, { name, color });
+      }      // Keep the existing icon when editing name/color only. The user can
+      // pick a new icon via the Add dialog (which has the icon picker).      Store.updateCategory(state, id, { name, color });
       Store.save(state);
       editingId = null;
       toast("Category updated", "success");
@@ -214,6 +215,26 @@ const CATEGORY_COLOR_POOL = [
   "#64748b",
 ];
 
+// Default emoji pool for new categories. Covers the most common
+// personal-finance use cases so the user can pick one with a click
+// instead of hunting for an emoji. Each is a single grapheme so the
+// radio buttons stay compact.
+const CATEGORY_ICON_POOL = [
+  "", "�️", "☕", "🍕", "🥗", "🍔",                       // food
+  "🛒", "🥦", "🍎", "🥛",                                   // groceries
+  "🚗", "🚌", "✈️", "⛽", "🅿️", "🚖",                       // transport
+  "🏠", "🏢", "🛋️", "🧹",                                   // housing
+  "💡", "📺", "💧", "🔥",                                   // utilities
+  "📶", "📱", "🌐", "📡",                                   // internet / mobile
+  "🏥", "💊", "🩺", "🧴",                                   // healthcare
+  "🎓", "📚", "✏️", "🏫",                                   // education
+  "🛍️", "🎁", "👕", "💄",                                   // shopping / gifts
+  "🎬", "🎮", "🎵", "📚", "🏋️",                           // entertainment / hobbies
+  "✈️", "🏨", "🧳", "🗺️",                                   // travel
+  "💳", "💰", "🏦", "💼",                                   // money / investments
+  "📦", "🐶", "🐱",                                         // pets / other
+];
+
 function pickNextColor(categories) {
   const used = new Set(categories.map((c) => c.color.toLowerCase()));
   return CATEGORY_COLOR_POOL.find((c) => !used.has(c.toLowerCase())) || CATEGORY_COLOR_POOL[0];
@@ -238,7 +259,35 @@ function openAddCategoryDialog({ state, onAdded }) {
       <label class="field__label" for="new-cat-color">Color</label>
       <input class="cat-form__color" id="new-cat-color" type="color" value="${suggestedColor}" />
     </div>
+    <div class="field">
+      <label class="field__label">Icon <span class="muted">(optional)</span></label>
+      <div class="cat-form__icons" id="new-cat-icons" role="radiogroup" aria-label="Category icon">
+        ${CATEGORY_ICON_POOL.map((emoji, i) => `
+          <button type="button" class="cat-form__icon-btn${i === 0 ? " is-selected" : ""}"
+                  data-icon="${escapeHtml(emoji)}"
+                  role="radio" aria-checked="${i === 0}"
+                  title="${emoji || "No icon"}">
+            ${emoji || "∅"}
+          </button>
+        `).join("")}
+      </div>
+      <input type="hidden" id="new-cat-icon" value="" />
+    </div>
   `;
+
+  // Wire up the icon picker (radiogroup behavior: click to select, single
+  // selection, the hidden input mirrors the chosen value).
+  const iconsEl = form.querySelector("#new-cat-icons");
+  const iconInput = form.querySelector("#new-cat-icon");
+  iconsEl.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".cat-form__icon-btn");
+    if (!btn) return;
+    iconsEl.querySelectorAll(".cat-form__icon-btn").forEach((b) => {
+      b.classList.toggle("is-selected", b === btn);
+      b.setAttribute("aria-checked", b === btn ? "true" : "false");
+    });
+    iconInput.value = btn.dataset.icon || "";
+  });
 
   openModal({
     title: "Add category",
@@ -267,8 +316,15 @@ function openAddCategoryDialog({ state, onAdded }) {
         nameEl.setAttribute("aria-invalid", "true");
         return false;
       }
-      Store.addCategory(state, { name, color: colorEl.value });
+      Store.addCategory(state, {
+        name,
+        color: colorEl.value,
+        icon: iconInput.value || "",
+      });
       Store.save(state);
+      // Notify other views (Quick Add dropdown, etc.) that the category
+      // list changed so they can rebuild their option lists.
+      document.dispatchEvent(new CustomEvent("expense-tracker:categories-changed"));
       toast("Category added", "success");
       onAdded && onAdded();
       return true;

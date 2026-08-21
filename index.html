@@ -2,12 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <title>Expense Tracker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0F172A" />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Brand: a PNG favicon (works in every browser tab / pinned tab) and
+         an iOS home-screen icon (apple-touch-icon). Both are loaded from
+         the same file so we don't have to ship duplicates. The light/dark
+         swap is wired in boot-theme.js so the tab icon follows the theme. -->
+    <link rel="icon" type="image/png" sizes="any" href="assets/brand/favicon.png" id="brand-favicon" />
+    <link rel="apple-touch-icon" href="assets/brand/favicon.png" />
+    <!-- Import map — kept here in case future modules need to resolve a
+         bare specifier against the dev server's node_modules. The
+         current crypto layer uses the browser-native Web Crypto API
+         (globalThis.crypto.subtle) and does not need any mapping. -->
+    <title>XPENSIC — your personal finance coach</title>
     <script src="js/boot-theme.js"></script>
+    <!-- Preconnect to Google Fonts so the Inter/Poppins swap is instant -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="css/reset.css" />
     <link rel="stylesheet" href="css/tokens.css" />
+    <link rel="stylesheet" href="css/premium.css" />
     <link rel="stylesheet" href="css/layout.css" />
     <link rel="stylesheet" href="css/components.css" />
   </head>
@@ -28,9 +43,32 @@
           </span>
         </button>
 
-        <a class="app-brand" href="#/dashboard" aria-label="Expense Tracker home">
-          <span class="app-brand__mark" aria-hidden="true">₹</span>
-          <span class="app-brand__name">Expense Tracker</span>
+        <a class="app-brand" href="#/dashboard" aria-label="XPENSIC home">
+          <!-- Header brand: the X+arrow mark from the PNG, paired with
+               live HTML for the wordmark + tagline so the tagline stays
+               editable (we render "Track expenses. Take control." in
+               mixed case as the user requested). Light + dark variants
+               of the mark are inlined and swapped via [data-theme]. -->
+          <img
+            class="app-brand__mark app-brand__mark--light"
+            src="assets/brand/mark-light.png"
+            alt=""
+            aria-hidden="true"
+            width="52"
+            height="52"
+          />
+          <img
+            class="app-brand__mark app-brand__mark--dark"
+            src="assets/brand/mark-dark.png"
+            alt=""
+            aria-hidden="true"
+            width="52"
+            height="52"
+          />
+          <span class="app-brand__type">
+            <span class="app-brand__wordmark">Xpensic</span>
+            <span class="app-brand__tagline">Track expenses. Take control.</span>
+          </span>
         </a>
 
         <div class="app-header__spacer"></div>
@@ -84,6 +122,9 @@
             </a></li>
             <li><a class="nav-link" href="#/categories" data-route="categories">
               <span class="nav-link__label">Categories</span>
+            </a></li>
+            <li><a class="nav-link" href="#/splits" data-route="splits">
+              <span class="nav-link__label">Splits</span>
             </a></li>
             <li><a class="nav-link" href="#/settings" data-route="settings">
               <span class="nav-link__label">Settings</span>

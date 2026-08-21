@@ -197,6 +197,7 @@ export function renderExpenses(container, { state, onChange }) {
                 <td data-label="Category">
                   <span class="cat-chip">
                     <span class="cat-swatch" style="background:${cat?.color || "var(--color-border-strong)"}"></span>
+                    ${cat?.icon ? `<span class="cat-icon" aria-hidden="true">${escapeHtml(cat.icon)}</span>` : ""}
                     ${escapeHtml(cat?.name || "—")}
                   </span>
                 </td>

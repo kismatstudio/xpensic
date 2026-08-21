@@ -8,9 +8,9 @@ const VALID = new Set(["light", "dark", "system"]);
 function readPref() {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return VALID.has(v) ? v : "system";
+    return VALID.has(v) ? v : "dark";
   } catch {
-    return "system";
+    return "dark";
   }
 }
 
@@ -37,7 +37,28 @@ export function applyTheme(pref = readPref()) {
   root.dataset.themePref = pref;
   // Hint to the browser for form controls / scrollbars
   root.style.colorScheme = resolved;
+  // Sync the favicon href to the resolved theme. Currently we ship a
+  // single PNG that works on both light and dark tab backgrounds, so
+  // the href is the same either way — but wiring this here means that
+  // the day the brand team ships a dark-tab-specific favicon, only
+  // this line needs to change.
+  syncFavicon(resolved);
   return { pref, resolved };
+}
+
+/**
+ * Update the favicon href to match the active theme. Falls back to a
+ * no-op when the link isn't on the page yet (boot-theme.js handles the
+ * pre-paint initial state).
+ */
+function syncFavicon(theme) {
+  if (typeof document === "undefined") return;
+  const link = document.getElementById("brand-favicon");
+  if (!link) return;
+  // The current brand ships one PNG favicon that reads on both tab
+  // backgrounds, so we always point at it. If a future variant is
+  // added, swap this to: theme === "dark" ? "...dark.png" : "...light.png"
+  link.setAttribute("href", "assets/brand/favicon.png");
 }
 
 export function initTheme() {

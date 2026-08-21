@@ -5,17 +5,33 @@
 import { newId } from "./ids.js";
 
 const STORAGE_KEY = "expense-tracker:v1";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 6;
 
+// `icon` is an emoji shown next to the color swatch. Default categories get
+// engaging icons; custom categories default to "" (no icon) until the user
+// picks one. Stored alongside the rest of the category object and preserved
+// across JSON import/export. NOT included in CSV (CSV stays name-only for
+// spreadsheet round-trip safety — see CSV_COLUMNS in csv.js).
+//
+// Order is the order the categories appear in the picker (most-used first
+// for the typical Indian personal-finance use case). IDs are stable so
+// existing expense rows keep pointing at the same category after upgrades.
 const DEFAULT_CATEGORIES = [
-  { id: "cat_food",        name: "Food",           color: "#ef4444", isDefault: true  },
-  { id: "cat_transport",   name: "Transport",      color: "#3b82f6", isDefault: true  },
-  { id: "cat_housing",     name: "Housing",        color: "#10b981", isDefault: true  },
-  { id: "cat_utilities",   name: "Utilities",      color: "#f59e0b", isDefault: true  },
-  { id: "cat_entertainment", name: "Entertainment", color: "#a855f7", isDefault: true  },
-  { id: "cat_health",      name: "Health",         color: "#06b6d4", isDefault: true  },
-  { id: "cat_shopping",    name: "Shopping",       color: "#ec4899", isDefault: true  },
-  { id: "cat_other",       name: "Other",          color: "#64748b", isDefault: true  },
+  { id: "cat_food",            name: "Food & Dining",           color: "#ef4444", icon: "🍽️", isDefault: true },
+  { id: "cat_groceries",       name: "Groceries",               color: "#f97316", icon: "🛒", isDefault: true },
+  { id: "cat_housing",         name: "Housing",                 color: "#10b981", icon: "🏠", isDefault: true },
+  { id: "cat_utilities",       name: "Utilities",               color: "#f59e0b", icon: "💡", isDefault: true },
+  { id: "cat_internet",        name: "Internet & Mobile",       color: "#0ea5e9", icon: "📶", isDefault: true },
+  { id: "cat_transport",       name: "Fuel & Transportation",   color: "#3b82f6", icon: "⛽🚖", isDefault: true },
+  { id: "cat_health",          name: "Healthcare",              color: "#06b6d4", icon: "🏥", isDefault: true },
+  { id: "cat_education",       name: "Education",               color: "#6366f1", icon: "🎓", isDefault: true },
+  { id: "cat_shopping",        name: "Shopping",                color: "#ec4899", icon: "🛍️", isDefault: true },
+  { id: "cat_entertainment",   name: "Entertainment",           color: "#a855f7", icon: "🎬", isDefault: true },
+  { id: "cat_travel",          name: "Travel",                  color: "#14b8a6", icon: "✈️", isDefault: true },
+  { id: "cat_gifts",           name: "Gifts",                   color: "#f43f5e", icon: "🎁", isDefault: true },
+  { id: "cat_loans",           name: "Loans & Credit",          color: "#8b5cf6", icon: "💳", isDefault: true },
+  { id: "cat_investments",     name: "Investments",             color: "#22c55e", icon: "💰", isDefault: true },
+  { id: "cat_other",           name: "Other",                   color: "#64748b", icon: "📦", isDefault: true },
 ];
 
 const DEFAULT_SETTINGS = {
@@ -40,6 +56,15 @@ function freshState() {
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     budgets: { monthly: {} },
     expenses: [],
+    // Splits (Feature 5). Treated as their own log alongside expenses so
+    // the history view can render them independently.
+    splits: [],
+    // Login streak — list of YYYY-MM-DD strings for every day the user
+    // successfully signed in. The dashboard's "tracking streak" badge
+    // counts consecutive days back from today using this list, so the
+    // streak reflects engagement (opening the app) rather than expense
+    // logging. Old states backfill to [] on load.
+    loginDays: [],
   };
 }
 
@@ -107,6 +132,111 @@ export function migrate(state) {
         : [];
     }
     state.version = 4;
+  }
+  // v4 -> v5: add `icon` (emoji) field to every category. Defaults get
+  // the engaging emoji defined in DEFAULT_CATEGORIES; any user-added
+  // custom categories get an empty string (the UI hides the icon slot
+  // when icon is empty, so nothing breaks visually).
+  if (state.version === 4) {
+    const iconById = Object.fromEntries(
+      DEFAULT_CATEGORIES.map((c) => [c.id, c.icon || ""])
+    );
+    const iconByName = Object.fromEntries(
+      DEFAULT_CATEGORIES.map((c) => [c.name.toLowerCase(), c.icon || ""])
+    );
+    const cats = Array.isArray(state.categories) ? state.categories : [];
+    for (const c of cats) {
+      if (typeof c.icon !== "string") {
+        c.icon =
+          (c.id && iconById[c.id]) ||
+          (c.name && iconByName[String(c.name).toLowerCase()]) ||
+          "";
+      }
+    }
+    // Same for any per-user stashed categories in the registry.
+    if (isPlainObject(state.profiles)) {
+      for (const entry of Object.values(state.profiles)) {
+        if (!isPlainObject(entry) || !Array.isArray(entry.categories)) continue;
+        for (const c of entry.categories) {
+          if (typeof c.icon !== "string") {
+            c.icon =
+              (c.id && iconById[c.id]) ||
+              (c.name && iconByName[String(c.name).toLowerCase()]) ||
+              "";
+          }
+        }
+      }
+    }
+    state.version = 5;
+  }
+  // v5 -> v6: expand the default category list. Existing categories keep
+  // their id so historical expense rows still resolve; new defaults are
+  // merged in. Renames (Food -> Food & Dining, Transport -> Fuel &
+  // Transportation, Health -> Healthcare) only apply when the user hasn't
+  // already customised the name — i.e. the stored name still matches the
+  // previous default. That keeps the upgrade non-destructive for users
+  // who have already renamed things in the UI.
+  if (state.version === 5) {
+    const renames = {
+      cat_food:        "Food & Dining",
+      cat_transport:   "Fuel & Transportation",
+      cat_health:      "Healthcare",
+    };
+    const cats = Array.isArray(state.categories) ? state.categories : [];
+    const presentIds = new Set(cats.map((c) => c.id));
+    // 1) Rename defaults the user hasn't touched.
+    for (const c of cats) {
+      if (!c.isDefault) continue;
+      if (renames[c.id] && (c.name === c.id || c.name === c.id.replace(/^cat_/, ""))) {
+        // Match against either the bare id (e.g. "cat_food") or a
+        // de-id'd version ("food") to catch both naming conventions.
+        const bare = c.id.replace(/^cat_/, "");
+        if (c.name.toLowerCase() === bare) c.name = renames[c.id];
+      }
+    }
+    // 2) Merge in any new defaults that aren't already present.
+    for (const def of DEFAULT_CATEGORIES) {
+      if (presentIds.has(def.id)) continue;
+      cats.push({ ...def });
+    }
+    // 3) Keep the array sorted by the canonical default order (so the
+    // picker shows categories in a consistent order), but preserve any
+    // user-added categories after the defaults.
+    const order = DEFAULT_CATEGORIES.map((c) => c.id);
+    const sortKey = (c) => {
+      const i = order.indexOf(c.id);
+      return i === -1 ? 1000 + cats.indexOf(c) : i;
+    };
+    cats.sort((a, b) => sortKey(a) - sortKey(b));
+    state.categories = cats;
+    // 4) Same merge for any per-user stashed categories in the registry.
+    if (isPlainObject(state.profiles)) {
+      for (const entry of Object.values(state.profiles)) {
+        if (!isPlainObject(entry) || !Array.isArray(entry.categories)) continue;
+        const uCats = entry.categories;
+        const uPresent = new Set(uCats.map((c) => c.id));
+        for (const c of uCats) {
+          if (!c.isDefault) continue;
+          if (renames[c.id] && (c.name === c.id || c.name === c.id.replace(/^cat_/, ""))) {
+            const bare = c.id.replace(/^cat_/, "");
+            if (c.name.toLowerCase() === bare) c.name = renames[c.id];
+          }
+        }
+        for (const def of DEFAULT_CATEGORIES) {
+          if (uPresent.has(def.id)) continue;
+          uCats.push({ ...def });
+        }
+        uCats.sort((a, b) => {
+          const ia = order.indexOf(a.id);
+          const ib = order.indexOf(b.id);
+          if (ia === -1 && ib === -1) return uCats.indexOf(a) - uCats.indexOf(b);
+          if (ia === -1) return 1;
+          if (ib === -1) return -1;
+          return ia - ib;
+        });
+      }
+    }
+    state.version = 6;
   }
   return state;
 }
@@ -194,12 +324,44 @@ export const Store = {
       }
     }
 
+    // Login-days list (added later). Backfill to an empty array for users
+    // upgrading from older schemas; the next login will seed today.
+    if (!Array.isArray(parsed.loginDays)) {
+      parsed.loginDays = [];
+    } else {
+      // Keep only valid YYYY-MM-DD strings so the streak math is safe.
+      parsed.loginDays = parsed.loginDays.filter(
+        (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d),
+      );
+    }
+
     return { ok: true, state: parsed, seeded: false };
   },
 
   save(state) {
-    return Store._write(state);
+    const result = Store._write(state);
+    // Notify any registered listener (e.g. main.js wires this to
+    // syncToServer) so every view's mutation reaches the server
+    // without each call site having to remember to push manually.
+    for (const fn of Store._listeners) {
+      try { fn(state, result); } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[store] save listener threw:", e?.message || e);
+      }
+    }
+    return result;
   },
+
+  /**
+   * Subscribe to every successful `Store.save`. Returns an unsubscribe
+   * function. Used by main.js to wire `syncToServer` once at boot.
+   */
+  onSave(fn) {
+    Store._listeners.add(fn);
+    return () => Store._listeners.delete(fn);
+  },
+
+  _listeners: new Set(),
 
   reset() {
     const s = freshState();
@@ -392,10 +554,28 @@ export const Store = {
   },
 
   // --- Categories ---
-  addCategory(state, { name, color }) {
-    const cat = { id: newId("cat"), name: name.trim(), color, isDefault: false };
+  // `icon` is an optional emoji (defaults to ""). We accept it but don't
+  // require it — older callers and CSV imports won't pass one, and that's
+  // fine (the UI hides the icon slot when the value is empty).
+  addCategory(state, { name, color, icon }) {
+    const cat = {
+      id: newId("cat"),
+      name: name.trim(),
+      color,
+      icon: typeof icon === "string" ? icon : "",
+      isDefault: false,
+    };
     state.categories.push(cat);
     return cat;
+  },
+
+  /**
+   * Look up a category by id and return its emoji icon, or "" if missing.
+   * Used by views that render the icon next to a category name.
+   */
+  getCategoryIcon(state, id) {
+    const c = (state.categories || []).find((x) => x.id === id);
+    return c && typeof c.icon === "string" ? c.icon : "";
   },
 
   updateCategory(state, id, patch) {
@@ -472,4 +652,62 @@ export const Store = {
       delete state.budgets.monthly[monthKey];
     }
   },
+
+  // --- Login-day tracking (used by the dashboard streak) ---
+  /**
+   * Record today as a login day. Idempotent — calling twice on the same
+   * day is a no-op. Returns true if the list was changed (i.e. today
+   * wasn't already recorded). The list is deduplicated and sorted
+   * ascending so the dashboard's consecutive-day math is straightforward.
+   *
+   * The caller passes `isoDate` (YYYY-MM-DD) so the function is testable
+   * without monkey-patching the system clock. In production we pass
+   * `todayISO()` from util.js.
+   */
+  recordLoginDay(state, isoDate) {
+    if (typeof isoDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
+      return false;
+    }
+    if (!Array.isArray(state.loginDays)) state.loginDays = [];
+    const set = new Set(state.loginDays);
+    const had = set.has(isoDate);
+    set.add(isoDate);
+    state.loginDays = [...set].sort();
+    return !had;
+  },
+
+  /**
+   * Compute the current login streak — the number of consecutive days
+   * (counting back from `todayIso`) on which the user signed in. Useful
+   * for tests; the dashboard does the math inline so it can reuse the
+   * precomputed `cursor` for the "last 7 days" visualisation.
+   */
+  computeLoginStreak(state, todayIso) {
+    if (!Array.isArray(state.loginDays) || !todayIso) return 0;
+    const days = new Set(state.loginDays);
+    let cursor = new Date(`${todayIso}T00:00:00`);
+    if (Number.isNaN(cursor.getTime())) return 0;
+    // Allow today to be missing — start counting from yesterday if so.
+    // This matches the previous expense-based behaviour and means the
+    // streak doesn't reset just because the user hasn't opened the app
+    // yet today.
+    if (!days.has(toISODate(cursor))) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    let streak = 0;
+    while (days.has(toISODate(cursor))) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return streak;
+  },
 };
+
+// Local date helper used by computeLoginStreak. Kept at module scope so
+// the function above can share it without polluting the exported surface.
+function toISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}

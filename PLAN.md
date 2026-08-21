@@ -1,4 +1,4 @@
-# Expense Tracker — Project Plan
+# XPENSIC — Project Plan
 
 A lightweight, single-user expense tracker that runs entirely in the browser. No build step, no backend, no install — just open `index.html`.
 
