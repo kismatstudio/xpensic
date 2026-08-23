@@ -1,15 +1,15 @@
 // Tiny REST client for the expense-tracker backend.
 //
-// The server lives at `window.ET_API_BASE` (defaults to
-// `http://127.0.0.1:8787`). Every request sends the session cookie via
-// `credentials: "include"`; the cookie itself is httpOnly so JS can't
-// read it — we just let the browser manage it.
+// The API is served from the SAME ORIGIN as the client (the dev
+// server proxies /api/* to the backend on port 8787). This avoids
+// all cross-origin cookie issues — incognito mode, strict SameSite,
+// and different-port localhost all work seamlessly.
 //
 // All methods throw on network errors and non-2xx responses, returning
 // the parsed JSON body. The login view catches the throws and surfaces
 // the `.error` field as a toast / inline message.
 
-const BASE = (typeof window !== "undefined" && window.ET_API_BASE) || "http://127.0.0.1:8787";
+const BASE = (typeof window !== "undefined" && window.ET_API_BASE) || "";
 
 async function request(path, { method = "GET", body, timeoutMs = 8000, _retried = false } = {}) {
   const ctrl = new AbortController();
@@ -35,14 +35,16 @@ async function request(path, { method = "GET", body, timeoutMs = 8000, _retried 
 
   // Access token expired → try to rotate the refresh token once, then retry.
   // We never auto-refresh the refresh endpoint itself (would loop) or the
-  // signin/signup paths (they set fresh cookies).
+  // signin/signup paths (they set fresh cookies). whoami IS included so a
+  // page reload after the 15-min access token expires can still recover
+  // via the 30-day refresh token — otherwise the user is bounced to the
+  // login gate on every reload after 15 minutes, which is terrible UX.
   if (
     res.status === 401 &&
     !_retried &&
     !path.includes("/refresh") &&
     !path.includes("/auth/signin") &&
-    !path.includes("/auth/signup") &&
-    !path.includes("/auth/whoami")
+    !path.includes("/auth/signup")
   ) {
     try {
       const refreshRes = await fetch(BASE + "/api/auth/refresh", {

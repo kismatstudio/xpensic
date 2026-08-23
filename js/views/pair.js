@@ -118,7 +118,7 @@ export async function mountTrustedPairing({ container, mk, deviceKeys, userId })
 
   try {
     // Create + sign the invite, render QR.
-    const serverUrl = (typeof window !== "undefined" && window.ET_API_BASE) || "http://127.0.0.1:8787";
+    const serverUrl = (typeof window !== "undefined" && window.ET_API_BASE) || "";
     const invite = await createPairingInvite({
       serverUrl,
       accountId: userId || "",

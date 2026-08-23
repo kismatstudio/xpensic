@@ -152,6 +152,10 @@
       ></div>
     </div>
 
-    <script type="module" src="js/main.js"></script>
+    <!-- Cache-busting query param: Chrome aggressively caches parsed ES
+         modules even with Cache-Control: no-store. Bump the version number
+         whenever you change main.js (or any module it imports) so the
+         browser fetches fresh copies instead of serving stale ones. -->
+    <script type="module" src="js/main.js?v=2"></script>
   </body>
 </html>

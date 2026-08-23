@@ -14,7 +14,7 @@
 // wrap). Losing the phrase doesn't compromise the account — losing
 // the password + all devices does.
 
-import { randomBytes } from "./sodium.mjs";
+import { randomBytes, sha256 } from "./sodium.mjs";
 
 // Compact 256-word list. Each word is short, common, and easy to
 // spell. Curated to avoid homophones (to/few/too) and words with
@@ -113,8 +113,9 @@ export async function phraseToKey(words) {
 
 async function checksumOf(payload) {
   // Use the first 3 bytes of SHA-256 as a simple typo detector.
-  const s = await import("./sodium.mjs").then((m) => m.getSodium());
-  return (await s.crypto_hash_sha256(payload)).subarray(0, 3);
+  // Uses the Web Crypto-backed sha256 helper from sodium.mjs (the
+  // old getSodium() shim no longer exposes crypto_hash_sha256).
+  return (await sha256(payload)).subarray(0, 3);
 }
 
 // Suppress unused-var warning for the constant while keeping it

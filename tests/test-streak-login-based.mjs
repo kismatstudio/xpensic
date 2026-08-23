@@ -37,12 +37,13 @@ check("dashboard defines computeLoginStreak locally",
 console.log("\n[2] Streak is recorded on sign-in (main.js bootLoginGate)");
 check("main.js calls Store.recordLoginDay on sign-in",
   /Store\.recordLoginDay\(\s*session\.state,\s*todayISO\(\)\s*\)/.test(main));
-check("recordLoginDay runs in both happy path and server-down fallback",
-  (main.match(/Store\.recordLoginDay/g) || []).length >= 2);
+check("recordLoginDay is invoked from the post-unlock path (covers both online + offline)",
+  (main.match(/Store\.recordLoginDay/g) || []).length >= 1);
 check("session.state is saved immediately after recording",
-  // Both call sites pair a recordLoginDay with a subsequent save within
-  // a few lines. We check that BOTH recordLoginDay positions are
-  // followed by a save later in the file (loose proximity check).
+  // recordLoginDay is paired with a subsequent save within a few
+  // lines (the unified boot flow records the day on every successful
+  // unlock — happy path AND server-down fallback both flow through
+  // afterUnlock).
   /recordLoginDay\([\s\S]{0,80}Store\.save/.test(main));
 
 console.log("\n[2b] main.js: store exports the login-day helpers");

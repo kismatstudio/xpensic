@@ -148,7 +148,7 @@ check("main.js calls Auth.whoami on boot",                 /Auth\.whoami\(\)/.te
 check("main.js calls Crypto.getVault to hydrate after unlock", /Crypto\.getVault/.test(main) || /loadVault/.test(main) || /loadVault/.test(read("js/views/unlock.js")));
 check("main.js calls syncToServer after mutations",        /syncToServer\(\)/.test(main));
 check("signOut calls Auth.signout",                        /Auth\.signout\(/.test(main));
-check("signOut flushes pending sync before clearing",      /await\s+flushVaultSync/.test(main) || /await\s+syncToServer/.test(main));
+check("signOut flushes pending sync before clearing",      /await\s+flushVaultSync/.test(main) || /await\s+flushSync/.test(main) || /await\s+syncToServer/.test(main));
 check("signOut uses replaceState (no render flash)",       /history\.replaceState/.test(main));
 check("main.js shows an offline toast when sync fails",    /Couldn't reach the server/.test(main) ||
                                                             /server.*offline/i.test(main));

@@ -38,6 +38,10 @@ import {
   formatIndianPhone, generateAvatarDataUrl,
 } from "./util.js";
 import { Auth, Data, Crypto, apiBase, ApiError, Expenses, Categories, Budgets, Settings, Splits } from "./api.js";
+import { getDeviceKey, isAvailable as deviceKeyAvailable, clearDeviceKey as clearLocalDeviceKey, needsReauth, touchLastUnlockAt } from "./crypto/device-key.mjs";
+import { unwrapWithDeviceKey, wrapWithDeviceKey, newDeviceKey, getDeviceId } from "./crypto/keystore.mjs";
+import { setMasterKey, getMasterKey as readMasterKey } from "./crypto/unlock-gate.mjs";
+import { loadVault as loadEncryptedVault } from "./crypto/vault-sync.mjs";
 
 // ---- Route table -----------------------------------------------------------
 
@@ -987,6 +991,12 @@ async function signOut() {
   // Flush any pending writes before we lose the session.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; syncPending = false; }
   try { await flushSync(); } catch { /* ignore — we're signing out anyway */ }
+  // Wipe the local device key from IndexedDB so the next sign-in
+  // on this browser re-prompts for the master password. Without
+  // this, signing out and closing the tab would still let anyone
+  // with access to this browser auto-unlock the next account that
+  // signs in here.
+  try { await clearLocalDeviceKey(session.state?.profile?.userId || ""); } catch { /* ignore */ }
   try { await Auth.signout(); } catch { /* even if the server is down, clear locally */ }
   Store.updateProfile(session.state, { userId: "", name: "", phone: "", avatarDataUrl: "" });
   Store.clearTopLevelData(session.state);
@@ -1077,18 +1087,137 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
     // a fresh vault or surface a clear error.
     console.warn("[boot] master-key fetch failed:", err?.message || err);
   }
-  if (wraps.length > 0) {
-    // Returning user — send them through the unlock screen.
-    mountUnlock({
-      profile: { name: user.name || "", userId: user.userId },
-      onUnlocked: (state) => afterUnlock(state, { justSignedUp }),
-    });
-  } else {
+
+  if (wraps.length === 0) {
     // Brand-new account — walk them through the vault setup wizard.
+    // passwordUnlock: true because the user just chose their master
+    // password, which counts as an explicit unlock for re-auth timing.
     mountVaultSetup({
       profile: { name: user.name || "", userId: user.userId, phone: user.phone || "", avatarDataUrl: user.avatarDataUrl || "" },
-      onComplete: (state) => afterUnlock(state, { justSignedUp, freshVault: true }),
+      onComplete: (state) => afterUnlock(state, { justSignedUp, freshVault: true, passwordUnlock: true }),
     });
+    return;
+  }
+
+  // Returning user. Try the silent auto-unlock path first: if we
+  // find a device wrap matching this device's IndexedDB-bound key,
+  // we can decrypt the vault without re-prompting for the master
+  // password. This keeps a page refresh from sending the user back
+  // to the unlock screen on every reload.
+  const autoUnlocked = await tryDeviceAutoUnlock({ user, wraps });
+  if (autoUnlocked) return;
+
+  // Fall through to the manual unlock screen (password / phrase).
+  // passwordUnlock: true so afterUnlock resets the 7-day re-auth timer.
+  mountUnlock({
+    profile: { name: user.name || "", userId: user.userId },
+    onUnlocked: (state) => afterUnlock(state, { justSignedUp, passwordUnlock: true }),
+  });
+}
+
+/**
+ * Attempt to silently unlock the vault using this browser's
+ * IndexedDB-bound device wrap. Returns true on success (caller
+ * should bail out of the unlock flow) and false on any failure
+ * (caller should fall back to the manual unlock screen).
+ *
+ * Failures are silent — we don't want a missing device wrap or a
+ * corrupt IndexedDB entry to confuse the user when they could
+ * just type their password instead.
+ */
+async function tryDeviceAutoUnlock({ user, wraps }) {
+  try {
+    if (!(await deviceKeyAvailable())) return false;
+    // Periodic re-auth: if 7 days have passed since the last
+    // password-based unlock on this device, skip auto-unlock and
+    // fall through to the manual unlock screen. This ensures a
+    // stolen device can't silently access the vault indefinitely.
+    if (await needsReauth(user.userId)) {
+      console.info("[boot] periodic re-auth required — skipping auto-unlock");
+      return false;
+    }
+    const deviceId = getDeviceId();
+    const myDeviceWrap = wraps.find(
+      (w) => w.wrapType === "device" && w.envelope && w.envelope.deviceId === deviceId,
+    );
+    if (!myDeviceWrap) return false;
+    const deviceKey = await getDeviceKey(user.userId);
+    if (!deviceKey) return false;
+    let mk;
+    try { mk = await unwrapWithDeviceKey(myDeviceWrap.envelope, deviceKey); }
+    catch { return false; }
+    setMasterKey(mk);
+    let state = null;
+    try { state = await loadEncryptedVault(); } catch { state = null; }
+    if (!state) return false;
+    // Adopt the server-side profile so name/avatar are fresh.
+    state.profile = {
+      ...(state.profile || {}),
+      userId: user.userId,
+      name: user.displayName || state.profile?.name || "",
+      phone: user.phone || state.profile?.phone || "",
+      avatarDataUrl: user.avatarDataUrl || state.profile?.avatarDataUrl || "",
+    };
+    session.state = state;
+    afterUnlock(state, { justSignedUp: false });
+    return true;
+  } catch (err) {
+    // Any unexpected error → silent fallback to manual unlock.
+    console.warn("[boot] device auto-unlock failed:", err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Promote an unlocked session into a persistent device wrap so the
+ * next reload can skip the unlock screen. Called after the user
+ * successfully unlocks via password/phrase, or after they create
+ * a brand-new vault.
+ *
+ * Behaviour:
+ *   1. Look for an existing device wrap matching this deviceId.
+ *      If one is already on the server, leave it alone — the
+ *      IndexedDB key was used to unwrap it just now.
+ *   2. Otherwise, generate a fresh device key, persist it to
+ *      IndexedDB, wrap the MK with it, and upload the wrap to
+ *      the server alongside the existing wraps.
+ */
+async function ensureDeviceWrap({ user, mk, existingWraps }) {
+  try {
+    if (!(await deviceKeyAvailable())) return;
+    const { setDeviceKey } = await import("./crypto/device-key.mjs");
+    const deviceId = getDeviceId();
+    const hasMine = (existingWraps || []).some(
+      (w) => w.wrapType === "device" && w.envelope && w.envelope.deviceId === deviceId,
+    );
+    if (hasMine) return; // already set up; nothing to do
+
+    // Pull the device key for this user out of IndexedDB. If it
+    // doesn't exist yet (first-time setup), generate + persist a
+    // fresh one before wrapping.
+    let deviceKey = await getDeviceKey(user.userId);
+    if (!deviceKey) {
+      deviceKey = newDeviceKey();
+      await setDeviceKey(user.userId, deviceKey);
+    }
+    const wrap = await wrapWithDeviceKey(mk, deviceKey, deviceId);
+    // Crypto.getMasterKey normalises wraps into { wrapType, envelope, createdAt }
+    // shape, but Crypto.putMasterKey sends them to a server that expects each
+    // wrap to be a self-contained envelope (ct/nonce/salt at the top level).
+    // Flatten existing wraps back to envelope shape before merging with the
+    // new device wrap (which is already flat from wrapWithDeviceKey).
+    const flatExisting = (existingWraps || [])
+      .filter(
+        (w) => !(w.wrapType === "device" && w.envelope && w.envelope.deviceId === deviceId),
+      )
+      .map((w) => (w.envelope && typeof w.envelope === "object") ? w.envelope : w);
+    const next = [...flatExisting, wrap];
+    await Crypto.putMasterKey(next);
+  } catch (err) {
+    // Best-effort. If this fails the user can still use the app;
+    // they just won't have silent auto-unlock until they sign out
+    // and back in (or use a different device).
+    console.warn("[boot] ensureDeviceWrap failed:", err?.message || err);
   }
 }
 
@@ -1096,8 +1225,13 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
  * Common post-unlock path. Hydrates the in-memory state from the
  * vault, records today's login day, persists to localStorage, and
  * mounts the app shell.
+ *
+ * `passwordUnlock` should be true when the user just entered their
+ * vault password (or recovery phrase) manually. It's false for
+ * silent auto-unlocks. When true, we stamp `lastUnlockAt` in
+ * IndexedDB so the 7-day periodic re-auth window resets.
  */
-function afterUnlock(state, { justSignedUp = false, freshVault = false } = {}) {
+function afterUnlock(state, { justSignedUp = false, freshVault = false, passwordUnlock = false } = {}) {
   session.state = state;
   if (!Array.isArray(session.state.loginDays)) session.state.loginDays = [];
   Store.recordLoginDay(session.state, todayISO());
@@ -1106,9 +1240,34 @@ function afterUnlock(state, { justSignedUp = false, freshVault = false } = {}) {
   if (freshVault) {
     toast("Your encrypted vault is ready.", "success", 3500);
   }
+  // When the user entered their password, reset the 7-day re-auth
+  // timer so auto-unlock can resume for the next week. Best-effort.
+  if (passwordUnlock) {
+    const userId = session.state.profile?.userId;
+    if (userId) {
+      touchLastUnlockAt(userId).catch(() => {});
+    }
+  }
+  // Promote the unlocked session into a persistent device wrap so
+  // subsequent page reloads (and same-tab reloads) can auto-unlock
+  // without re-prompting for the master password. Best-effort.
+  try {
+    const userId = session.state.profile?.userId;
+    const mk = readMasterKeySafe();
+    if (userId && mk) {
+      // Pull the current wraps so we can merge instead of overwrite.
+      Crypto.getMasterKey()
+        .then((wraps) => ensureDeviceWrap({ user: { userId }, mk, existingWraps: wraps }))
+        .catch(() => {});
+    }
+  } catch { /* ignore — auto-unlock is best-effort */ }
   // Push the new login day to the server (via the profile patch path).
   syncToServer();
   mountAppShell();
+}
+
+function readMasterKeySafe() {
+  try { return readMasterKey(); } catch { return null; }
 }
 
 async function hydrateFromServer() {

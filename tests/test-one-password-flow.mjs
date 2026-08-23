@@ -68,12 +68,16 @@ check("setup writes both wraps to the server via Crypto.putMasterKey",
 console.log("\n[4] main.js boot flow routes through unlock or setup");
 check("main.js calls Crypto.getMasterKey to decide the flow",
   /Crypto\.getMasterKey\(\)/.test(main));
-check("main.js calls mountUnlock when wraps exist",
-  /wraps\.length > 0[\s\S]{0,200}mountUnlock/.test(main));
+check("main.js calls mountUnlock when wraps exist (after device auto-unlock attempt)",
+  /tryDeviceAutoUnlock/.test(main) && /mountUnlock/.test(main));
 check("main.js calls mountVaultSetup when no wraps exist",
-  /wraps\.length > 0[\s\S]{0,400}mountVaultSetup/.test(main));
+  /wraps\.length === 0/.test(main) && /mountVaultSetup/.test(main));
 check("main.js records the login day AFTER unlock (post-hydrate)",
   /afterUnlock[\s\S]{0,400}recordLoginDay/.test(main));
+check("main.js promotes an unlocked session into a persistent device wrap",
+  /ensureDeviceWrap/.test(main) && /wrapWithDeviceKey/.test(main));
+check("main.js attempts device-wrap auto-unlock before the unlock screen",
+  /tryDeviceAutoUnlock[\s\S]{0,300}mountUnlock/.test(main));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

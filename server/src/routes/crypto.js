@@ -44,8 +44,14 @@ cryptoRouter.put("/master-key", (req, res) => {
     if (typeof w.wrapType !== "string" || !VALID.has(w.wrapType)) {
       return res.status(400).json({ ok: false, error: "Invalid wrapType; expected password|device|phrase." });
     }
-    if (!w.ct || !w.nonce || !w.salt) {
-      return res.status(400).json({ ok: false, error: "Envelope must include ct, nonce, and salt." });
+    if (!w.ct || !w.nonce) {
+      return res.status(400).json({ ok: false, error: "Envelope must include ct and nonce." });
+    }
+    // Salt is required for password/phrase wraps (KDF derives the key
+    // from it), but device wraps use a raw key with kdf: "none" and
+    // legitimately have an empty salt. Don't reject them for that.
+    if (!w.salt && w.wrapType !== "device") {
+      return res.status(400).json({ ok: false, error: "Envelope must include a salt." });
     }
   }
   replaceAllWraps(req.user.userId, wraps);
