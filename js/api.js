@@ -59,7 +59,19 @@ async function request(path, { method = "GET", body, timeoutMs = 8000, _retried 
       // Dispatch an event so the app can boot the user back to the
       // login gate with a friendly toast, instead of leaving them
       // stranded on the dashboard with a 401 storm in the console.
-      if (typeof window !== "undefined" && !window.__xpensicSessionExpiredNotified) {
+      //
+      // Only fire the event if we're sure we were in an authenticated
+      // session. On a fresh boot the in-memory refresh store may be
+      // cold (server was restarted) and we don't want to nuke the
+      // user before the unlock flow has had a chance to recover.
+      // The simplest signal: there's a non-empty userId in our
+      // in-memory profile, OR the request was clearly an
+      // authenticated one (anything other than /api/auth/whoami
+      // when the gate is up).
+      const hadSession =
+        typeof window !== "undefined" &&
+        !!(window.__xpensicCurrentUserId || "");
+      if (hadSession && !window.__xpensicSessionExpiredNotified) {
         window.__xpensicSessionExpiredNotified = true;
         window.dispatchEvent(new CustomEvent("xpensic:session-expired"));
         // Allow another notification after the next sign-in.

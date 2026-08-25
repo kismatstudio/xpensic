@@ -28,6 +28,18 @@ import { renderBarChart } from "../components/chart.js";
 import { confirmDialog } from "../components/confirm.js";
 import { parseQuickAdd, escapeHtml, paymentMethodLabel, upiAppLabel, suggestCategory, todayISO, currentTimeHHMM, monthKey, formatMonth } from "../util.js";
 
+// `syncToServer` is exposed on window by main.js so views can kick the
+// server-side mirror immediately after a mutation. We grab it lazily
+// (and tolerate it being absent — e.g. in tests) so this module has no
+// hard dependency on main.js's bootstrap order.
+const _syncToServer = () => {
+  try {
+    if (typeof window !== "undefined" && typeof window.syncToServer === "function") {
+      window.syncToServer();
+    }
+  } catch { /* best-effort */ }
+};
+
 /**
  * Renders the Dashboard into the given container.
  * @param {HTMLElement} container
@@ -688,6 +700,18 @@ function mountQuickAdd(wrap, ctx) {
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const raw = input.value;
+    const trimmedRaw = (raw || "").trim();
+
+    // Guard: empty / whitespace-only input → nudge the user instead of
+    // silently creating a 0-amount expense. The hint text below the
+    // input already explains the format ("Coffee 180"); we just make
+    // sure the button can't fire on an empty form.
+    if (!trimmedRaw) {
+      toast("Type a note and amount, e.g. Coffee 180", "info");
+      input.focus();
+      return;
+    }
+
     const { amount } = parseQuickAdd(raw);
     const explicitNote = (noteInput?.value || "").trim();
     const parsedNote = parseQuickAdd(raw).note;
@@ -696,7 +720,7 @@ function mountQuickAdd(wrap, ctx) {
     if (amount == null) {
       const ok = await confirmDialog({
         title: "No amount detected",
-        message: `“${raw}” doesn't contain a number. Add it anyway with ${settings.currencySymbol}0?`,
+        message: `"${raw}" doesn't contain a number. Add it anyway with ${settings.currencySymbol}0?`,
         confirmLabel: "Add anyway",
         cancelLabel: "Keep editing",
       });
@@ -723,14 +747,37 @@ function mountQuickAdd(wrap, ctx) {
       return;
     }
 
+    // Capture the running count BEFORE adding so we can show a
+    // "first expense!" hint on the first add of the session.
+    const wasFirst = ctx.state.expenses.length === 0;
+
     Store.addExpense(ctx.state, expense);
+    // Save + sync immediately (not waiting for the 500ms debounce) so
+    // the toast fires the same instant the expense is on disk. The
+    // sync helper is still debounced internally; this just kicks the
+    // debounce timer off right now.
     Store.save(ctx.state);
-    const noteTail = explicitNote ? ` · "${explicitNote}"` : "";
-    toast(`Added ${formatCurrency(expense.amount, settings)}${noteTail}`, "success");
+    _syncToServer();
+
+    // Reset the form fields BEFORE re-rendering. Doing this in the
+    // wrong order is what made the form feel "broken" — the user
+    // would click Add, the page would refresh, and the freshly
+    // rebuilt input still had the old value (because the old form was
+    // already gone). Clearing inputs explicitly first, then asking the
+    // app to re-render, keeps both halves correct.
     input.value = "";
     if (noteInput) noteInput.value = "";
     preview.innerHTML = "";
-    ctx.refresh();
+
+    const noteTail = explicitNote ? ` · "${explicitNote}"` : "";
+    const greeting = wasFirst ? "🎉 First expense logged — nice!" : "Added";
+    toast(`${greeting} ${formatCurrency(expense.amount, settings)}${noteTail}`, "success", 3000);
+
+    // Defer the re-render by a microtask so the toast has a chance to
+    // paint and the focused element doesn't get clobbered mid-keystroke.
+    // The expense is already in state and persisted, so this is purely
+    // a UI refresh.
+    setTimeout(() => { try { ctx.refresh(); } catch { /* best-effort */ } }, 50);
   });
 }
 

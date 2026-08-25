@@ -29,7 +29,9 @@ categoriesRouter.post("/", (req, res) => {
   const err = validateCategory(req.body);
   if (err) return res.status(400).json({ ok: false, error: err });
   const category = addCategory(req.user.userId, {
-    id: newId("cat"),
+    // Honor a client-supplied id (same duplicate-prevention rationale
+    // as the expenses route — the diff-sync keys rows by client ids).
+    id: (typeof req.body.id === "string" && req.body.id) ? req.body.id : newId("cat"),
     name: req.body.name.trim(),
     color: req.body.color,
     icon: req.body.icon || "",

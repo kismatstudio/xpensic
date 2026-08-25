@@ -115,10 +115,17 @@ Store.onSave(() => syncToServer());
 async function flushSync() {
   if (!session.state || !session.state.profile?.userId) return;
   if (!lastKnownServerState) {
-    // Haven't hydrated yet — nothing to diff against. Skip; the boot
-    // hydration will set lastKnownServerState and subsequent saves will
-    // sync normally.
-    return;
+    // Defensive: if for any reason lastKnownServerState is still null
+    // (e.g. a race where the user mutated state in the same tick as the
+    // unlock snapshot), bootstrap it from an EMPTY baseline so this
+    // round's diffs — including any pending Quick Add entries — are
+    // pushed immediately. The old behaviour (seed from current state)
+    // silently dropped the mutation that triggered this flush, which is
+    // exactly the "Quick Add entry never recorded" symptom.
+    lastKnownServerState = {
+      expenses: [], categories: [], splits: [],
+      budgets: { monthly: {} }, settings: {},
+    };
   }
   const userId = session.state.profile.userId;
   const diffs = computeDiffs(lastKnownServerState, session.state);
@@ -998,6 +1005,15 @@ async function signOut() {
   // signs in here.
   try { await clearLocalDeviceKey(session.state?.profile?.userId || ""); } catch { /* ignore */ }
   try { await Auth.signout(); } catch { /* even if the server is down, clear locally */ }
+  // Clear the active-session flag so any in-flight 401 retries from
+  // the just-cleared session don't bounce the user back to a now-
+  // meaningless login gate.
+  if (typeof window !== "undefined") {
+    window.__xpensicCurrentUserId = "";
+  }
+  // Reset the diff baseline so the next sign-in starts with a fresh
+  // snapshot instead of the just-cleared user's data.
+  lastKnownServerState = null;
   Store.updateProfile(session.state, { userId: "", name: "", phone: "", avatarDataUrl: "" });
   Store.clearTopLevelData(session.state);
   Store.save(session.state);
@@ -1111,7 +1127,16 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
   // passwordUnlock: true so afterUnlock resets the 7-day re-auth timer.
   mountUnlock({
     profile: { name: user.name || "", userId: user.userId },
-    onUnlocked: (state) => afterUnlock(state, { justSignedUp, passwordUnlock: true }),
+    onUnlocked: (state) => {
+      afterUnlock(state, { justSignedUp, passwordUnlock: true });
+      // Same rationale as tryDeviceAutoUnlock: pull the live
+      // per-resource state from the server so the user immediately
+      // sees categories/expenses added from other devices. The
+      // vault is the source of truth but can lag by one or two
+      // syncs; /api/data is the authoritative read for "what the
+      // server currently has." Non-fatal if it fails.
+      hydrateFromServer().catch(() => {});
+    },
   });
 }
 
@@ -1160,6 +1185,15 @@ async function tryDeviceAutoUnlock({ user, wraps }) {
     };
     session.state = state;
     afterUnlock(state, { justSignedUp: false });
+    // Best-effort: also pull the live per-resource state from the
+    // server. The encrypted vault can lag by one or two syncs (the
+    // vault mirror is best-effort and runs after the per-resource
+    // POSTs succeed). A quick GET /api/data here ensures the
+    // dashboard reflects the most recent server-side changes
+    // (e.g. categories added from another device) on the next
+    // render. Failures are non-fatal — the vault is the source of
+    // truth and we already have it loaded.
+    hydrateFromServer().catch(() => {});
     return true;
   } catch (err) {
     // Any unexpected error → silent fallback to manual unlock.
@@ -1236,32 +1270,32 @@ function afterUnlock(state, { justSignedUp = false, freshVault = false, password
   if (!Array.isArray(session.state.loginDays)) session.state.loginDays = [];
   Store.recordLoginDay(session.state, todayISO());
   Store.save(session.state);
+  // CRITICAL: diff-sync baseline. Without this, flushSync() exits
+  // early and entries never reach the server/vault.
+  if (!lastKnownServerState) {
+    try { lastKnownServerState = JSON.parse(JSON.stringify(session.state)); }
+    catch (e) { console.warn("[boot] baseline snapshot failed:", e?.message || e); }
+  }
+  if (typeof window !== "undefined") {
+    window.__xpensicCurrentUserId = session.state.profile?.userId || "";
+  }
   session.firstRun = justSignedUp || freshVault;
-  if (freshVault) {
-    toast("Your encrypted vault is ready.", "success", 3500);
-  }
-  // When the user entered their password, reset the 7-day re-auth
-  // timer so auto-unlock can resume for the next week. Best-effort.
-  if (passwordUnlock) {
-    const userId = session.state.profile?.userId;
-    if (userId) {
-      touchLastUnlockAt(userId).catch(() => {});
-    }
-  }
+  if (freshVault) toast("Your encrypted vault is ready.", "success", 3500);
   // Promote the unlocked session into a persistent device wrap so
-  // subsequent page reloads (and same-tab reloads) can auto-unlock
-  // without re-prompting for the master password. Best-effort.
+  // subsequent reloads can auto-unlock without re-prompting.
   try {
     const userId = session.state.profile?.userId;
     const mk = readMasterKeySafe();
     if (userId && mk) {
-      // Pull the current wraps so we can merge instead of overwrite.
       Crypto.getMasterKey()
         .then((wraps) => ensureDeviceWrap({ user: { userId }, mk, existingWraps: wraps }))
         .catch(() => {});
     }
-  } catch { /* ignore — auto-unlock is best-effort */ }
-  // Push the new login day to the server (via the profile patch path).
+  } catch { /* best-effort */ }
+  if (passwordUnlock) {
+    const userId = session.state.profile?.userId;
+    if (userId) touchLastUnlockAt(userId).catch(() => {});
+  }
   syncToServer();
   mountAppShell();
 }
@@ -1304,11 +1338,78 @@ async function hydrateFromServer() {
       phone: session.state.profile.phone,
       avatarDataUrl: session.state.profile.avatarDataUrl,
     };
-    session.state = raw;
+
+    // CRITICAL: don't clobber local state with stale server data if the
+    // user has been making changes since we kicked off this fetch.
+    // The original implementation blindly replaced `session.state` with
+    // `raw`, which silently dropped any locally-added expense or budget
+    // and made the dashboard show only the server's older view. The
+    // merge rule is: for each list, take the union by id, preferring
+    // the local copy on conflicts (local is fresher — the sync path
+    // pushes it up asynchronously). Settings/profile are scalar so
+    // we keep local there too.
+    //
+    // `cur` is captured BEFORE the fetch so we can merge against the
+    // exact state that was live when hydration started. Because `cur`
+    // holds a reference to the same object as `session.state`, any
+    // mutations the user makes while the fetch is in flight (e.g. a
+    // Quick Add expense pushed onto `session.state.expenses`) are
+    // visible through `cur.expenses` too — the merge below picks them
+    // up automatically.
+    const cur = session.state;
+    const mergeById = (localArr, serverArr) => {
+      const out = [];
+      const seen = new Set();
+      for (const item of localArr || []) {
+        out.push(item);
+        seen.add(item.id);
+      }
+      for (const item of serverArr || []) {
+        if (item && item.id && !seen.has(item.id)) out.push(item);
+      }
+      return out;
+    };
+    session.state = {
+      ...raw,
+      // Merge lists so any items added locally (not yet pushed to the
+      // server at the moment this fetch started) are preserved.
+      expenses: mergeById(cur.expenses, raw.expenses),
+      categories: mergeById(cur.categories, raw.categories),
+      splits: mergeById(cur.splits, raw.splits),
+      // Budgets: object keyed by monthKey+categoryId. Local wins on
+      // any conflict; server-only months are pulled in.
+      budgets: {
+        monthly: {
+          ...(raw.budgets?.monthly || {}),
+          ...(cur.budgets?.monthly || {}),
+        },
+      },
+      // Settings + profile: local wins. The server is the authoritative
+      // store, but local changes made after the fetch started have not
+      // been pushed yet so we'd otherwise lose them.
+      settings: { ...(raw.settings || {}), ...(cur.settings || {}) },
+      profile: { ...(raw.profile || {}), ...(cur.profile || {}) },
+    };
     Store.save(session.state);
     // Snapshot the hydrated state so the diff sync knows what the server
     // already has — subsequent mutations only push what actually changed.
-    lastKnownServerState = JSON.parse(JSON.stringify(raw));
+    //
+    // CRITICAL FIX (Quick Add silently lost): this baseline MUST reflect
+    // what the SERVER currently holds — NOT the merged session.state.
+    // The merge above folds locally-added-but-not-yet-pushed expenses
+    // into session.state; snapshotting that made the diff-sync believe
+    // the server already had them, so no POST /api/expenses ever fired
+    // ("no footprint in dev tools") and the entries vanished on reload.
+    // Basing the snapshot on the raw server payload keeps those local
+    // items "pending", so the next flushSync() pushes them up.
+    lastKnownServerState = JSON.parse(JSON.stringify({
+      ...session.state,
+      expenses: raw.expenses || [],
+      categories: raw.categories || [],
+      splits: raw.splits || [],
+      budgets: { monthly: { ...(raw.budgets?.monthly || {}) } },
+      settings: { ...(raw.settings || {}) },
+    }));
     setServerOnline(true);
   } catch (err) {
     setServerOnline(false, err);
@@ -1339,8 +1440,18 @@ async function init() {
   // user back to the login gate with a clear toast. Without this, the
   // user is stranded on the dashboard with a 401 storm in the console
   // and no UI affordance to recover.
+  //
+  // SAFETY: only fire when we've successfully signed in (a real
+  // userId is loaded into session.state). On boot, init() calls
+  // Auth.whoami() before the unlock flow completes — if that whoami
+  // 401s (stale cookie, in-memory refresh store cleared on server
+  // restart, etc) the event would otherwise bounce the user to the
+  // login gate even though they're already authenticated and the
+  // unlock screen is about to handle the situation. Guarding on the
+  // userId makes this a true "mid-session expiration" handler.
   window.addEventListener("xpensic:session-expired", () => {
-    if (session.state?.profile?.userId === "") return; // already signed out
+    if (!session.state?.profile?.userId) return; // not yet signed in
+    if (document.body.classList.contains("app-locked")) return; // gate already up
     toast("Your session expired — please sign in again.", "info", 5000);
     // Persist any local state the user added offline so it's not lost.
     try { Store.save(session.state); } catch { /* ignore */ }
@@ -1369,6 +1480,12 @@ async function init() {
         phone: me.user.phone || "",
         avatarDataUrl: me.user.avatarDataUrl || session.state.profile.avatarDataUrl,
       };
+      // Mark the window so api.js knows the session is alive even
+      // before unlock completes (e.g. for any mid-unlock reloads
+      // racing the cookie expiry).
+      if (typeof window !== "undefined") {
+        window.__xpensicCurrentUserId = me.user.userId || "";
+      }
       bootUnlockOrSetup({ user: { ...me.user, name: me.user.displayName || "" }, justSignedUp: false });
       return;
     }

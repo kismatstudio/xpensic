@@ -16,6 +16,9 @@ import {
   findUserByEmail,
   findUserById,
   updateUser,
+  putRefreshToken,
+  getRefreshToken,
+  deleteRefreshToken,
 } from "../db.js";
 import {
   validateIdentifier,
@@ -31,11 +34,16 @@ const REFRESH_COOKIE_NAME = "et_refresh"; // rotating refresh token
 const TOKEN_TTL = "15m";                 // access token: short-lived
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-// In-memory refresh-token store. Maps refresh token hash → session.
-// Keyed by SHA-256 of the token so a DB/backup leak of this store doesn't
-// expose usable tokens. Production swaps this for the `refresh_tokens`
-// Postgres table (see db/schema.sql) with the same rotation semantics.
-const refreshStore = new Map();
+// Refresh-token store. Backed by the persistent refresh_tokens table
+// (via db.js) so sessions survive backend restarts. Previously this was
+// an in-memory Map — every restart silently invalidated all signed-in
+// clients, so their sync POSTs failed with 401 and Quick Add entries
+// never reached the server.
+const refreshStore = {
+  set: (key, session) => putRefreshToken(key, session),
+  get: (key) => getRefreshToken(key),
+  delete: (key) => deleteRefreshToken(key),
+};
 
 function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");

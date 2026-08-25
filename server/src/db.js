@@ -119,6 +119,14 @@ const TABLES = {
     file: "vault_blobs.csv",
     header: ["userId", "envelope", "updatedAt"],
   },
+  refresh_tokens: {
+    // Auth sessions: SHA-256 hash of each live refresh token. Persisted
+    // so a backend restart doesn't silently invalidate every signed-in
+    // client (which made sync POSTs fail with 401 and Quick Add entries
+    // appear to be "lost" even though they were queued correctly).
+    file: "refresh_tokens.csv",
+    header: ["tokenHash", "userId", "email", "expiresAt", "parent", "createdAt"],
+  },
 };
 
 // In-memory cache. `users`, `blobs`, `vault_blobs`, and `crypto_wraps`
@@ -133,6 +141,7 @@ const cache = {
   categories: [],       // [{ id, userId, ... }]
   budgets: [],          // [{ userId, monthKey, categoryId, amount }]
   splits: [],           // [{ userId, id, ...split fields, createdAt }]
+  refresh_tokens: new Map(), // { tokenHash: { userId, email, expiresAt, parent, createdAt } }
   loaded: false,
 };
 
@@ -249,6 +258,21 @@ export function load() {
     cache.vault_blobs[r.userId] = r.envelope || "";
   }
 
+  // Refresh-token sessions. Skip expired rows on load.
+  cache.refresh_tokens = new Map();
+  const nowMs = Date.now();
+  for (const r of readTable("refresh_tokens")) {
+    if (!r.tokenHash) continue;
+    if (Number(r.expiresAt) <= nowMs) continue;
+    cache.refresh_tokens.set(r.tokenHash, {
+      userId: r.userId,
+      email: r.email || "",
+      expiresAt: Number(r.expiresAt),
+      parent: r.parent || null,
+      createdAt: Number(r.createdAt),
+    });
+  }
+
   cache.loaded = true;
 }
 
@@ -283,6 +307,15 @@ export function flush() {
       else if (name === "categories") writeTable("categories", cache.categories.map(categoryToRow));
       else if (name === "budgets")    writeTable("budgets",    cache.budgets.map(budgetToRow));
       else if (name === "splits")     writeTable("splits",     cache.splits.map(splitToRow));
+      else if (name === "refresh_tokens") writeTable("refresh_tokens",
+        Array.from(cache.refresh_tokens.entries()).map(([tokenHash, s]) => ({
+          tokenHash,
+          userId: s.userId || "",
+          email: s.email || "",
+          expiresAt: String(s.expiresAt ?? ""),
+          parent: s.parent || "",
+          createdAt: String(s.createdAt ?? ""),
+        })));
     }
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -772,4 +805,34 @@ export function getDbDir() {
  */
 export function readRawTable(name) {
   return readTable(name);
+}
+
+// --- Refresh-token sessions (persistent) -----------------------------------
+
+/** Store a hashed refresh-token session. */
+export function putRefreshToken(tokenHash, session) {
+  load();
+  cache.refresh_tokens.set(tokenHash, { ...session });
+  markDirty("refresh_tokens");
+}
+
+/** Look up a live refresh-token session by hash, or null. */
+export function getRefreshToken(tokenHash) {
+  load();
+  const s = cache.refresh_tokens.get(tokenHash);
+  if (!s) return null;
+  if (Date.now() > s.expiresAt) {
+    cache.refresh_tokens.delete(tokenHash);
+    markDirty("refresh_tokens");
+    return null;
+  }
+  return { ...s };
+}
+
+/** Revoke a refresh-token session (rotation / sign-out). */
+export function deleteRefreshToken(tokenHash) {
+  load();
+  const had = cache.refresh_tokens.delete(tokenHash);
+  if (had) markDirty("refresh_tokens");
+  return had;
 }

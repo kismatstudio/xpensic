@@ -32,8 +32,12 @@ expensesRouter.post("/", (req, res) => {
   const err = validateExpense(req.body);
   if (err) return res.status(400).json({ ok: false, error: err });
   const now = new Date().toISOString();
+  // Honor a client-supplied id when present. The diff-sync client keys
+  // expenses by id; if the server mints a fresh id for an expense the
+  // client already tracks, the next sync sees the client's id as
+  // "missing" and re-pushes it — creating duplicates on every boot.
   const expense = addExpense(req.user.userId, {
-    id: newId("exp"),
+    id: (typeof req.body.id === "string" && req.body.id) ? req.body.id : newId("exp"),
     amount: req.body.amount,
     date: req.body.date,
     categoryId: req.body.categoryId,

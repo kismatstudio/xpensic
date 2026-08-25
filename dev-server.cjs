@@ -42,7 +42,19 @@ const server = http.createServer((req, res) => {
   // Proxy /api/* requests to the backend API server so the client
   // and API share the same origin. This fixes cross-origin cookie
   // rejection in incognito mode and browsers with strict SameSite.
-  if (pathname.startsWith("/api/")) {
+  //
+  // The check uses a path-segment boundary (the next char after
+  // "/api" must be "/" or nothing). Without this guard, requests
+  // for client-side files like `/api.js` would also be proxied to
+  // the backend — the backend doesn't know that path, returns a
+  // JSON 404, and the browser tries to parse JSON as JavaScript
+  // and chokes on `export` ("Unexpected token 'export'" at line 1).
+  // The boundary check makes `/api/auth/whoami` proxy while
+  // `/api.js?v=2` and `/api/something/somefile.js` (if it ever
+  // existed) would NOT be proxied. We also strip a trailing `?` so
+  // `/api?...` doesn't sneak through.
+  const apiPath = pathname.split("?")[0];
+  if (apiPath === "/api" || apiPath.startsWith("/api/")) {
     return proxyApi(req, res);
   }
 
