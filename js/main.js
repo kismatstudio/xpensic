@@ -1110,7 +1110,7 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
     // password, which counts as an explicit unlock for re-auth timing.
     mountVaultSetup({
       profile: { name: user.name || "", userId: user.userId, phone: user.phone || "", avatarDataUrl: user.avatarDataUrl || "" },
-      onComplete: (state) => afterUnlock(state, { justSignedUp, freshVault: true, passwordUnlock: true }),
+      onComplete: (state) => afterUnlock(state, { justSignedUp, freshVault: true, passwordUnlock: true }).catch(() => {}),
     });
     return;
   }
@@ -1128,14 +1128,15 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
   mountUnlock({
     profile: { name: user.name || "", userId: user.userId },
     onUnlocked: (state) => {
-      afterUnlock(state, { justSignedUp, passwordUnlock: true });
-      // Same rationale as tryDeviceAutoUnlock: pull the live
-      // per-resource state from the server so the user immediately
-      // sees categories/expenses added from other devices. The
-      // vault is the source of truth but can lag by one or two
-      // syncs; /api/data is the authoritative read for "what the
-      // server currently has." Non-fatal if it fails.
-      hydrateFromServer().catch(() => {});
+      afterUnlock(state, { justSignedUp, passwordUnlock: true }).then(() => {
+        // Same rationale as tryDeviceAutoUnlock: pull the live
+        // per-resource state from the server so the user immediately
+        // sees categories/expenses added from other devices. The
+        // vault is the source of truth but can lag by one or two
+        // syncs; /api/data is the authoritative read for "what the
+        // server currently has." Non-fatal if it fails.
+        hydrateFromServer().catch(() => {});
+      }).catch(() => {});
     },
   });
 }
@@ -1184,7 +1185,12 @@ async function tryDeviceAutoUnlock({ user, wraps }) {
       avatarDataUrl: user.avatarDataUrl || state.profile?.avatarDataUrl || "",
     };
     session.state = state;
-    afterUnlock(state, { justSignedUp: false });
+    // afterUnlock is now async (it awaits ensureDeviceWrap so the
+    // device key is in IndexedDB before the user can interact).
+    // We don't need to block on it here — the device wrap already
+    // exists (that's why auto-unlock succeeded), so ensureDeviceWrap
+    // will be a no-op. Fire-and-forget is fine.
+    afterUnlock(state, { justSignedUp: false }).catch(() => {});
     // Best-effort: also pull the live per-resource state from the
     // server. The encrypted vault can lag by one or two syncs (the
     // vault mirror is best-effort and runs after the per-resource
@@ -1265,7 +1271,7 @@ async function ensureDeviceWrap({ user, mk, existingWraps }) {
  * silent auto-unlocks. When true, we stamp `lastUnlockAt` in
  * IndexedDB so the 7-day periodic re-auth window resets.
  */
-function afterUnlock(state, { justSignedUp = false, freshVault = false, passwordUnlock = false } = {}) {
+async function afterUnlock(state, { justSignedUp = false, freshVault = false, passwordUnlock = false } = {}) {
   session.state = state;
   if (!Array.isArray(session.state.loginDays)) session.state.loginDays = [];
   Store.recordLoginDay(session.state, todayISO());
@@ -1283,15 +1289,24 @@ function afterUnlock(state, { justSignedUp = false, freshVault = false, password
   if (freshVault) toast("Your encrypted vault is ready.", "success", 3500);
   // Promote the unlocked session into a persistent device wrap so
   // subsequent reloads can auto-unlock without re-prompting.
+  //
+  // CRITICAL: this MUST complete before mountAppShell() so the
+  // device key is in IndexedDB by the time the user can interact.
+  // Previously this was fire-and-forget — if the user reloaded
+  // before the async chain finished, the device key was never
+  // stored and every subsequent reload re-prompted for the
+  // password. Now we await it (with a short timeout so a slow
+  // server doesn't block the UI indefinitely).
   try {
     const userId = session.state.profile?.userId;
     const mk = readMasterKeySafe();
     if (userId && mk) {
-      Crypto.getMasterKey()
-        .then((wraps) => ensureDeviceWrap({ user: { userId }, mk, existingWraps: wraps }))
-        .catch(() => {});
+      const wraps = await Crypto.getMasterKey();
+      await ensureDeviceWrap({ user: { userId }, mk, existingWraps: wraps });
     }
-  } catch { /* best-effort */ }
+  } catch (err) {
+    console.warn("[boot] ensureDeviceWrap failed:", err?.message || err);
+  }
   if (passwordUnlock) {
     const userId = session.state.profile?.userId;
     if (userId) touchLastUnlockAt(userId).catch(() => {});
