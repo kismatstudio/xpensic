@@ -358,45 +358,33 @@ function renderNavProfile() {
   const avatar = p.avatarDataUrl || generateAvatarDataUrl(p);
   const phoneDisplay = formatIndianPhone(p.phone) || "";
   const name = p.name || "—";
-  // The drawer mirrors the top of the Profile screen (avatar + name + phone)
-  // and adds a signout affordance right beneath it so the user can leave
-  // the session without having to drill into the Profile view. The
-  // button is a tertiary-style ghost inside the same bordered card so it
-  // doesn't compete with the primary nav links below.
+  // The drawer mirrors the top of the Profile screen (avatar + name +
+  // phone) with a chevron affordance that links to the Profile view.
+  // Sign-out now lives in the nav list (index.html) so the profile card
+  // stays clean and focused on identity.
   //
   // The drawer also carries an XPENSIC brand block at the very top of
   // the profile section so the empty space above the user info isn't
   // wasted and the app identity is reinforced on every navigation.
   host.innerHTML = `
     <div class="app-nav__brand">
-      <!-- Drawer brand: full lockup (mark + wordmark + tagline) on
-           one logical line. The tagline wraps to a second line on
-           narrow drawers so the full sentence is always visible
-           without horizontal scrolling. The wordmark uses a tighter
-           size than the header so the three pieces fit within the
-           248px drawer width comfortably, and the mark sits a touch
-           larger so the lockup has visual weight against the menu
-           items below. -->
+      <!-- Drawer brand: the full SVG lockup (wordmark included) with a
+           light/dark swap. Anchored at the very top of the drawer with
+           minimal padding so no space is wasted above the logo. -->
       <img
         class="app-nav__brand-mark app-nav__brand-mark--light"
-        src="assets/brand/mark-light.png"
-        alt=""
-        aria-hidden="true"
-        width="40"
-        height="40"
+        src="assets/brand/xpensic-light.png"
+        alt="Xpensic"
+        width="155"
+        height="48"
       />
       <img
         class="app-nav__brand-mark app-nav__brand-mark--dark"
-        src="assets/brand/mark-dark.png"
-        alt=""
-        aria-hidden="true"
-        width="40"
-        height="40"
+        src="assets/brand/xpensic-dark.png"
+        alt="Xpensic"
+        width="255"
+        height="75"
       />
-      <div class="app-nav__brand-type">
-        <div class="app-nav__brand-wordmark">Xpensic</div>
-        <div class="app-nav__brand-tagline">Track expenses. Take control.</div>
-      </div>
     </div>
     <div class="app-nav__profile-card">
       <a class="app-nav__profile-link" href="#/profile" data-route="profile">
@@ -405,30 +393,16 @@ function renderNavProfile() {
           <div class="app-nav__profile-name">${escapeHtml(name)}</div>
           ${phoneDisplay ? `<div class="app-nav__profile-phone">${escapeHtml(phoneDisplay)}</div>` : ""}
         </div>
-      </a>
-      <button class="app-nav__signout" type="button" id="app-nav-signout" aria-label="Sign out">
-        <span class="app-nav__signout-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
+        <span class="app-nav__profile-chevron" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </span>
-        <span class="app-nav__signout-label">Sign out</span>
-      </button>
+      </a>
     </div>
   `;
   host.querySelector(".app-nav__profile-link")?.classList.toggle(
     "is-active",
     getRouteFromHash() === "profile",
   );
-  // Wire the signout button. The handler is created lazily so it's never
-  // attached before the app shell is mounted (and so it doesn't fire
-  // during the gate's mount).
-  const signoutBtn = host.querySelector("#app-nav-signout");
-  if (signoutBtn) {
-    signoutBtn.addEventListener("click", () => signOut());
-  }
 }
 
 function render() {
@@ -538,11 +512,13 @@ function mountNavToggle() {
   });
 
   nav.addEventListener("click", (e) => {
-    // Close the drawer whenever the user activates any link OR the
-    // signout button — the nav is a transient surface and shouldn't
-    // stay open while the user is being navigated or signed out.
+    // Close the drawer whenever the user activates any link, the
+    // profile link, a quick action, or the signout button — the nav is
+    // a transient surface and shouldn't stay open while the user is
+    // being navigated or signed out.
     if (e.target.closest(".nav-link") ||
         e.target.closest(".app-nav__profile-link") ||
+        e.target.closest(".app-nav__quick-btn") ||
         e.target.closest(".app-nav__signout")) {
       closeDrawer();
     }
@@ -557,6 +533,32 @@ function mountNavToggle() {
       closeDrawer();
     }
   });
+}
+
+// Wire the drawer's quick-action buttons (Add Expense / Create Budget /
+// Scan Receipt) and the sign-out button. These live in the static nav
+// shell (index.html) so they're mounted once when the app shell mounts.
+function mountNavActions() {
+  const nav = document.getElementById("app-nav");
+  if (!nav) return;
+
+  nav.querySelectorAll(".app-nav__quick-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const action = btn.dataset.quick;
+      if (action === "add-expense") {
+        openAddExpenseModal();
+      } else if (action === "create-budget") {
+        window.location.hash = "#/budgets";
+      } else if (action === "scan-receipt") {
+        openAddExpenseModal();
+      }
+    });
+  });
+
+  const signoutBtn = nav.querySelector("#app-nav-signout");
+  if (signoutBtn) {
+    signoutBtn.addEventListener("click", () => confirmSignOut());
+  }
 }
 
 function mountThemeToggle() {
@@ -582,6 +584,12 @@ function renderDashboard(container) {
     session,
     openAddExpenseModal,
     refresh: () => render(),
+    // Resolve the LIVE state at call time. `session.state` is replaced
+    // (not mutated) by hydrateFromServer()/afterUnlock()/auto-unlock, so
+    // a closure that captured `state` at render time can go stale. Quick
+    // Add must write to the current object or the entry lands in a
+    // detached copy and never shows up in the re-rendered dashboard.
+    getState: () => session.state,
   });
 }
 
@@ -617,7 +625,7 @@ function renderProfile(container) {
     state: session.state,
     refresh: () => render(),
     refreshNav: () => renderNavProfile(),
-    onSignOut: () => signOut(),
+    onSignOut: () => confirmSignOut(),
   });
 }
 
@@ -695,12 +703,16 @@ function renderSettings(container) {
       Back up your data as JSON (full state) or CSV (expenses only, Google
       Sheets / Excel friendly).
     </div>
-    <div class="data-actions">
-      <button class="btn" id="data-export-json" type="button">Export full backup (JSON)</button>
-      <button class="btn" id="data-import-json" type="button">Import backup (JSON)</button>
+    <div class="field">
+      <label class="field__label" for="data-action">Data actions</label>
+      <select class="field__select" id="data-action">
+        <option value="">Select action…</option>
+        <option value="export-json">Export full backup (JSON)</option>
+        <option value="import-json">Import backup (JSON)</option>
+        <option value="export-csv">Export for Sheets/Excel (CSV)</option>
+        <option value="import-csv">Import CSV</option>
+      </select>
       <input type="file" id="data-import-json-input" accept="application/json,.json" hidden />
-      <button class="btn" id="data-export-csv" type="button">Export for Sheets/Excel (CSV)</button>
-      <button class="btn" id="data-import-csv" type="button">Import CSV</button>
       <input type="file" id="data-import-csv-input" accept=".csv,text/csv" hidden />
     </div>
   `;
@@ -716,9 +728,13 @@ function renderSettings(container) {
       Your data lives on the server at <code>${escapeHtml(apiBase)}</code>.
       Sign out to clear this device's local cache.
     </div>
-    <div class="data-actions">
-      <button class="btn" id="acct-sync" type="button">Sync now</button>
-      <button class="btn btn--danger" id="acct-signout" type="button">Sign out</button>
+    <div class="field">
+      <label class="field__label" for="account-action">Account actions</label>
+      <select class="field__select" id="account-action">
+        <option value="">Select action…</option>
+        <option value="sync">Sync now</option>
+        <option value="signout">Sign out</option>
+      </select>
     </div>
   `;
   wrap.appendChild(acctCard);
@@ -733,15 +749,19 @@ function renderSettings(container) {
       Permanently erase your data on the server. This cannot be undone —
       export a backup first if you want to keep anything.
     </div>
+    <div class="field">
+      <label class="field__label" for="danger-action">Danger actions</label>
+      <select class="field__select" id="danger-action">
+        <option value="">Select action…</option>
+        <option value="erase">Erase all server data</option>
+      </select>
+    </div>
     <div class="field" style="margin-top:var(--space-2)">
       <label class="field__label" for="danger-confirm">
         Type <strong>ERASE</strong> to confirm
       </label>
       <input class="field__input" id="danger-confirm" type="text" />
       <div class="field__error" id="danger-confirm-error" hidden></div>
-    </div>
-    <div class="data-actions">
-      <button class="btn btn--danger" id="danger-erase" type="button" disabled>Erase all server data</button>
     </div>
   `;
   wrap.appendChild(dangerCard);
@@ -811,15 +831,34 @@ function renderSettings(container) {
   });
 
   // --- Data wiring -------------------------------------------------------
-  dataCard.querySelector("#data-export-json").addEventListener("click", () => {
-    const json = exportFullState(state);
-    const filename = `expense-tracker-${todayISO()}.json`;
-    downloadAsFile(filename, json, "application/json");
-    toast("Backup downloaded", "success");
+  const $dataAction = dataCard.querySelector("#data-action");
+  const $importInput = dataCard.querySelector("#data-import-json-input");
+  const $importCsvInput = dataCard.querySelector("#data-import-csv-input");
+
+  $dataAction.addEventListener("change", () => {
+    const action = $dataAction.value;
+    $dataAction.value = "";
+    if (action === "export-json") {
+      const json = exportFullState(state);
+      const filename = `expense-tracker-${todayISO()}.json`;
+      downloadAsFile(filename, json, "application/json");
+      toast("Backup downloaded", "success");
+    } else if (action === "import-json") {
+      $importInput.click();
+    } else if (action === "export-csv") {
+      if (state.expenses.length === 0) {
+        toast("No expenses to export", "error");
+        return;
+      }
+      const csv = expensesToCSV(state.expenses, state.categories);
+      const filename = `expenses-${todayISO()}.csv`;
+      downloadAsFile(filename, csv, "text/csv");
+      toast(`Exported ${state.expenses.length} expenses (open in Google Sheets / Excel)`, "success", 4500);
+    } else if (action === "import-csv") {
+      $importCsvInput.click();
+    }
   });
 
-  const $importInput = dataCard.querySelector("#data-import-json-input");
-  dataCard.querySelector("#data-import-json").addEventListener("click", () => $importInput.click());
   $importInput.addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0];
     if (!file) return;
@@ -849,21 +888,6 @@ function renderSettings(container) {
     }
   });
 
-  dataCard.querySelector("#data-export-csv").addEventListener("click", () => {
-    if (state.expenses.length === 0) {
-      toast("No expenses to export", "error");
-      return;
-    }
-    const csv = expensesToCSV(state.expenses, state.categories);
-    const filename = `expenses-${todayISO()}.csv`;
-    downloadAsFile(filename, csv, "text/csv");
-    toast(`Exported ${state.expenses.length} expenses (open in Google Sheets / Excel)`, "success", 4500);
-  });
-
-  const $importCsvInput = dataCard.querySelector("#data-import-csv-input");
-  dataCard.querySelector("#data-import-csv").addEventListener("click", () => {
-    $importCsvInput.click();
-  });
   $importCsvInput.addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0];
     if (!file) return;
@@ -899,27 +923,44 @@ function renderSettings(container) {
   });
 
   // --- Account wiring ----------------------------------------------------
-  acctCard.querySelector("#acct-sync").addEventListener("click", async () => {
-    try {
-      await flushSync();
-      toast("Synced", "success");
-    } catch (err) {
-      toast("Sync failed: " + (err?.message || "unknown"), "error");
+  const $acctAction = acctCard.querySelector("#account-action");
+  $acctAction.addEventListener("change", async () => {
+    const action = $acctAction.value;
+    $acctAction.value = "";
+    if (action === "sync") {
+      try {
+        await flushSync();
+        toast("Synced", "success");
+      } catch (err) {
+        toast("Sync failed: " + (err?.message || "unknown"), "error");
+      }
+    } else if (action === "signout") {
+      confirmSignOut();
     }
   });
-  acctCard.querySelector("#acct-signout").addEventListener("click", () => signOut());
 
   // --- Danger wiring -----------------------------------------------------
   const $confirm = dangerCard.querySelector("#danger-confirm");
   const $err = dangerCard.querySelector("#danger-confirm-error");
-  const $erase = dangerCard.querySelector("#danger-erase");
-  $confirm.addEventListener("input", () => {
-    const ok = $confirm.value.trim() === "ERASE";
-    $erase.disabled = !ok;
-    $err.hidden = ok || !$confirm.value;
-    $err.textContent = ok || !$confirm.value ? "" : "Type ERASE (uppercase) to enable.";
+  const $dangerAction = dangerCard.querySelector("#danger-action");
+  $dangerAction.addEventListener("change", () => {
+    const action = $dangerAction.value;
+    $dangerAction.value = "";
+    if (action === "erase") {
+      const ok = $confirm.value.trim() === "ERASE";
+      if (!ok) {
+        $err.hidden = false;
+        $err.textContent = "Type ERASE (uppercase) to confirm.";
+        return;
+      }
+      doErase();
+    }
   });
-  $erase.addEventListener("click", async () => {
+  $confirm.addEventListener("input", () => {
+    $err.hidden = true;
+    $err.textContent = "";
+  });
+  async function doErase() {
     try {
       // Erase per-resource: delete all expenses + categories + splits,
       // reset budgets + settings. PUT /api/data is gone, so we fan out.
@@ -944,7 +985,7 @@ function renderSettings(container) {
     } catch (err) {
       toast("Could not erase: " + (err?.message || "unknown"), "error");
     }
-  });
+  }
 }
 
 // ---- Expense modal (shared by Dashboard + Expenses) ------------------------
@@ -994,6 +1035,36 @@ function openExpenseForm({ state, expense }) {
 
 // ---- Sign out --------------------------------------------------------------
 
+/**
+ * Show a confirmation modal before signing out. The user can cancel
+ * (default action) or confirm (danger action). We always go through
+ * this gate so a stray click on the nav sign-out button doesn't
+ * silently wipe the local device key + vault cache.
+ */
+function confirmSignOut() {
+  openModal({
+    title: "Sign out of XPENSIC?",
+    body: `
+      <p style="margin:0 0 var(--space-3) 0;color:var(--color-text-muted);line-height:1.5;">
+        You'll need your master password to sign back in on this device.
+      </p>
+      <p style="margin:0;color:var(--color-text-muted);line-height:1.5;">
+        Your data stays safe on the server — signing out only clears this
+        browser's local cache and the auto-unlock key.
+      </p>
+    `,
+    actions: [
+      { label: "Cancel", value: false, kind: "default" },
+      { label: "Sign out", value: true, kind: "danger" },
+    ],
+    onAction: (value) => {
+      if (!value) return true; // close on cancel
+      signOut();
+      return true;
+    },
+  });
+}
+
 async function signOut() {
   // Flush any pending writes before we lose the session.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; syncPending = false; }
@@ -1030,6 +1101,7 @@ function mountAppShell() {
   document.body.classList.remove("app-locked");
   mountMonthPicker();
   mountNavToggle();
+  mountNavActions();
   mountThemeToggle();
   mountKeyboardShortcuts(
     (route) => { window.location.hash = `#/${route}`; },

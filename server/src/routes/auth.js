@@ -256,6 +256,9 @@ authRouter.post("/send-otp", async (req, res) => {
         delivered: "email",
         message: "OTP sent to your email.",
         identifier: id.value,
+        // The resolved "From" address, so the client can tell the user
+        // exactly who the email came from (helps spot it in the inbox).
+        from: delivery.from || "",
         expiresInSeconds: 300,
       });
     }

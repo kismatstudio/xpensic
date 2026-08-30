@@ -15,7 +15,7 @@
          bare specifier against the dev server's node_modules. The
          current crypto layer uses the browser-native Web Crypto API
          (globalThis.crypto.subtle) and does not need any mapping. -->
-    <title>XPENSIC — your personal finance coach</title>
+    <title>XPENSIC — Track Expenses. Take Control.</title>
     <script src="js/boot-theme.js"></script>
     <!-- Preconnect to Google Fonts so the Inter/Poppins swap is instant -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -44,31 +44,24 @@
         </button>
 
         <a class="app-brand" href="#/dashboard" aria-label="XPENSIC home">
-          <!-- Header brand: the X+arrow mark from the PNG, paired with
-               live HTML for the wordmark + tagline so the tagline stays
-               editable (we render "Track expenses. Take control." in
-               mixed case as the user requested). Light + dark variants
-               of the mark are inlined and swapped via [data-theme]. -->
+          <!-- Header brand: the full SVG lockup (wordmark included) with
+               a light/dark swap via [data-theme]. The tagline sits below
+               as live HTML so it stays editable. -->
           <img
-            class="app-brand__mark app-brand__mark--light"
-            src="assets/brand/mark-light.png"
-            alt=""
-            aria-hidden="true"
-            width="52"
-            height="52"
+            class="app-brand__logo app-brand__logo--light"
+            src="assets/brand/xpensic-light.png"
+            alt="Xpensic"
+            width="180"
+          
+
           />
           <img
-            class="app-brand__mark app-brand__mark--dark"
-            src="assets/brand/mark-dark.png"
-            alt=""
-            aria-hidden="true"
-            width="52"
-            height="52"
+            class="app-brand__logo app-brand__logo--dark"
+            src="assets/brand/xpensic-dark.png"
+            alt="Xpensic"
+            width="140"
+            height="12"
           />
-          <span class="app-brand__type">
-            <span class="app-brand__wordmark">Xpensic</span>
-            <span class="app-brand__tagline">Track expenses. Take control.</span>
-          </span>
         </a>
 
         <div class="app-header__spacer"></div>
@@ -103,37 +96,82 @@
 
       <aside class="app-nav" id="app-nav" aria-label="Primary" aria-hidden="true">
         <section class="app-nav__profile" id="app-nav-profile">
-          <!-- Profile section rendered by renderNavProfile() in main.js -->
+          <!-- Brand + profile rendered by renderNavProfile() in main.js -->
         </section>
 
-        <nav>
+        <!-- Quick actions -->
+        <div class="app-nav__quick">
+          <div class="app-nav__section-label">Quick Actions</div>
+          <div class="app-nav__quick-grid">
+            <button class="app-nav__quick-btn" type="button" data-quick="add-expense" aria-label="Add expense">
+              <span class="app-nav__quick-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+              <span class="app-nav__quick-label">Add Expense</span>
+            </button>
+            <button class="app-nav__quick-btn" type="button" data-quick="scan-receipt" aria-label="Scan receipt">
+              <span class="app-nav__quick-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </span>
+              <span class="app-nav__quick-label">Scan Receipt</span>
+            </button>
+          </div>
+        </div>
+
+        <nav class="app-nav__links">
           <ul class="nav-list" role="list">
-            <li><a class="nav-link nav-link--profile" href="#/dashboard" data-route="dashboard">
-              <span class="nav-link__label">Profile</span>
-            </a></li>
             <li><a class="nav-link" href="#/dashboard" data-route="dashboard">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </span>
               <span class="nav-link__label">Dashboard</span>
             </a></li>
             <li><a class="nav-link" href="#/expenses" data-route="expenses">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+              </span>
               <span class="nav-link__label">Expenses</span>
             </a></li>
             <li><a class="nav-link" href="#/budgets" data-route="budgets">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              </span>
               <span class="nav-link__label">Budgets</span>
             </a></li>
             <li><a class="nav-link" href="#/categories" data-route="categories">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              </span>
               <span class="nav-link__label">Categories</span>
             </a></li>
             <li><a class="nav-link" href="#/splits" data-route="splits">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </span>
               <span class="nav-link__label">Splits</span>
             </a></li>
             <li><a class="nav-link" href="#/settings" data-route="settings">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </span>
               <span class="nav-link__label">Settings</span>
             </a></li>
+            <li><button class="nav-link nav-link--signout" type="button" id="app-nav-signout" aria-label="Sign out">
+              <span class="nav-link__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              </span>
+              <span class="nav-link__label">Sign Out</span>
+            </button></li>
           </ul>
         </nav>
 
         <div class="app-nav__footer">
-          <small class="muted">v1.0 &middot; phase 9 (polish)</small>
+          <div class="app-nav__encrypted">
+            <span class="app-nav__encrypted-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            </span>
+            <span class="app-nav__encrypted-label">End-to-End Encrypted</span>
+          </div>
         </div>
       </aside>
 
@@ -156,6 +194,6 @@
          modules even with Cache-Control: no-store. Bump the version number
          whenever you change main.js (or any module it imports) so the
          browser fetches fresh copies instead of serving stale ones. -->
-    <script type="module" src="js/main.js?v=5"></script>
+    <script type="module" src="js/main.js?v=6"></script>
   </body>
 </html>

@@ -24,6 +24,7 @@
   "license": "UNLICENSED",
   "dependencies": {
     "libsodium-wrappers": "^0.7.16",
-    "libsodium-wrappers-sumo": "^0.7.16"
+    "libsodium-wrappers-sumo": "^0.7.16",
+    "resend": "^6.24.0"
   }
 }

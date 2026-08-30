@@ -91,7 +91,10 @@ export async function sendOtpEmail(to, code, opts = {}) {
 
     let messageId = "";
     try { messageId = (await res.json())?.id || ""; } catch { /* ignore */ }
-    return { ok: true, live: true, messageId };
+    // Include the resolved "From" address so the caller can surface it
+    // to the user ("check your inbox, sent from …"). Helps debugging
+    // when the sender is the Resend sandbox vs. a verified domain.
+    return { ok: true, live: true, messageId, from };
   } catch (err) {
     return {
       ok: false,

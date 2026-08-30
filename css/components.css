@@ -232,7 +232,8 @@
   font-weight: 500;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: 21px;
+  margin-top: 10px;
 }
 .kpi__value {
   font-size: var(--text-2xl);
@@ -1475,6 +1476,7 @@ kbd {
   margin-top: var(--space-1);
   min-height: 1.2em;
   color: var(--color-text-muted);
+  margin-bottom: -50px;
 }
 
 /* ─── Suggestion pill ─────────────────────────────────────────────────── */
@@ -1845,8 +1847,8 @@ kbd {
    mark variants swap via [data-theme]. */
 .login-gate__mark {
   display: block;
-  width: 96px;
-  height: 96px;
+  width: 180px;
+  height: auto;
   margin: 0 auto var(--space-3);
   position: relative;
   z-index: 1;
@@ -1885,15 +1887,6 @@ kbd {
   z-index: 1;
 }
 
-.login-gate__wordmark {
-  font-family: var(--font-display, "Poppins"), "Inter", system-ui, sans-serif;
-  font-weight: 800;
-  font-size: clamp(36px, 5vw, 44px);
-  letter-spacing: -0.03em;
-  line-height: 1;
-  color: var(--brand-wordmark, #0F172A);
-}
-
 .login-gate__tagline {
   margin-top: var(--space-2);
   font-size: 14px;
@@ -1903,21 +1896,16 @@ kbd {
   opacity: 0.85;
 }
 
-[data-theme="dark"] .login-gate__wordmark {
-  color: #F8FAFC;
-}
 [data-theme="dark"] .login-gate__tagline {
   color: #94A3B8;
 }
 
 @media (max-width: 480px) {
-  .login-gate__mark { width: 80px; height: 80px; }
-  .login-gate__wordmark { font-size: 32px; }
+  .login-gate__mark { width: 150px; }
   .login-gate__tagline { font-size: 12px; }
 }
 @media (max-width: 360px) {
-  .login-gate__mark { width: 68px; height: 68px; }
-  .login-gate__wordmark { font-size: 28px; }
+  .login-gate__mark { width: 130px; }
 }
 
 .login-gate__title {
@@ -2126,6 +2114,63 @@ kbd {
   text-align: center;
   position: relative;
   z-index: 1;
+}
+
+/* ─── Recovery phrase (vault setup) ───────────────────────────────────── */
+/* 24-word grid shown after the user opts in to a recovery phrase.
+   Each word is numbered so the user can read them in order. The
+   action row below the grid holds the Copy / Download buttons. */
+.recovery-phrase {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: var(--space-3);
+  background: var(--glass-bg-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.4;
+}
+@media (max-width: 420px) {
+  .recovery-phrase { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.recovery-phrase__word {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--color-surface-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  word-break: break-all;
+}
+.recovery-phrase__idx {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  background: var(--glass-bg);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+.recovery-phrase__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: var(--space-2);
+}
+.recovery-phrase__actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.recovery-phrase__actions svg {
+  flex-shrink: 0;
 }
 
 /* ─── Profile view ────────────────────────────────────────────────────── */
@@ -2636,4 +2681,47 @@ kbd {
   font-size: var(--text-xs);
   font-weight: 700;
   box-shadow: 0 4px 12px rgba(245, 158, 11, 0.30);
+}
+
+/* ─── Password visibility toggle ──────────────────────────────────────── */
+/* Wraps a password input (.pw-field) and floats an eye button at its
+   right edge. The input gets right padding so text never runs under
+   the button. */
+.pw-field {
+  position: relative;
+  display: block;
+}
+.pw-field .field__input {
+  padding-right: 44px;
+}
+.pw-toggle {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition:
+    background var(--dur-med) var(--ease-out),
+    color var(--dur-med) var(--ease-out);
+}
+.pw-toggle:hover,
+.pw-toggle:focus-visible {
+  background: var(--glass-bg-soft);
+  color: var(--color-text);
+  outline: none;
+}
+.pw-toggle.is-active {
+  color: var(--color-primary, #6366f1);
 }

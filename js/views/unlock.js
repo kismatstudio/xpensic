@@ -16,6 +16,7 @@ import { setMasterKey } from "../crypto/unlock-gate.mjs";
 import { loadVault } from "../crypto/vault-sync.mjs";
 import { escapeHtml } from "../util.js";
 import { toast } from "../components/toast.js";
+import { enhancePasswordInputs } from "../components/pw-toggle.js";
 import { Store } from "../store.js";
 
 export async function mountUnlock({ onUnlocked, profile }) {
@@ -44,22 +45,25 @@ export async function mountUnlock({ onUnlocked, profile }) {
   const hasPhraseWrap   = wraps.some((w) => w.wrapType === "phrase");
 
   root.innerHTML = `
-    <div class="login-gate__card">
-      <div class="login-gate__type">
-        <div class="login-gate__wordmark">Unlock your vault</div>
-        <div class="login-gate__tagline">Welcome back${profile?.name ? `, ${escapeHtml(profile.name)}` : ""}. Enter your password to decrypt your data.</div>
-      </div>
-
-      <div class="login-gate__tabs" role="tablist" aria-label="Unlock method">
-        <button class="login-gate__tab is-active" type="button" role="tab"
-                id="unlock-tab-pw" aria-selected="true" aria-controls="unlock-panel-pw">
-          Password
-        </button>
-        <button class="login-gate__tab" type="button" role="tab"
-                id="unlock-tab-phrase" aria-selected="false" aria-controls="unlock-panel-phrase" tabindex="-1"
-                ${hasPhraseWrap ? "" : "hidden"}>
-          Recovery phrase
-        </button>
+    <style>
+      .unlock-card{background:#f4f6fb;border-radius:24px;padding:32px 28px;max-width:420px;margin:auto;box-shadow:0 10px 40px rgba(0,0,0,.08);font-family:system-ui,sans-serif;color:#1a2332;}
+      .unlock-card h1{font-size:1.7rem;font-weight:800;margin:0 0 6px;letter-spacing:-.02em;}
+      .unlock-card .sub{color:#6b7280;margin:0 0 22px;font-size:.95rem;line-height:1.35;}
+      .pill-tabs{display:flex;gap:8px;background:#e8ecf1;padding:4px;border-radius:999px;margin-bottom:22px;}
+      .pill-tab{flex:1;border:none;background:transparent;padding:10px 0;border-radius:999px;font-weight:600;color:#6b7280;cursor:pointer;font-size:.95rem;transition:.2s;}
+      .pill-tab.is-active{background:#7c6cf5;color:#fff;box-shadow:0 2px 8px rgba(124,108,245,.35);}
+      .field__label{font-weight:600;font-size:.85rem;color:#374151;margin-bottom:6px;display:block;}
+      .field__input{width:100%;padding:14px 16px;border:1.5px solid #dde2e8;border-radius:14px;font-size:1rem;background:#fff;color:#111;outline:none;box-sizing:border-box;}
+      .field__hint{font-size:.82rem;color:#6b7280;margin-top:6px;}
+      .btn--primary{width:100%;padding:14px;border:none;border-radius:14px;background:#7c6cf5;color:#fff;font-weight:700;font-size:1.05rem;cursor:pointer;margin-top:14px;box-shadow:0 4px 14px rgba(124,108,245,.3);}
+      .legal{font-size:.82rem;color:#6b7280;margin-top:18px;line-height:1.35;text-align:center;}
+    </style>
+    <div class="unlock-card">
+      <h1 id="unlock-title"><span style="font-size:40px;vertical-align:middle;margin-right:2px;margin-left:20px;">🛡️</span>Unlock your VAULT</h1>
+      <p class="sub">Welcome back${profile?.name ? `, ${escapeHtml(profile.name)}` : ""}. Enter your password to decrypt your data.</p>
+      <div class="pill-tabs" role="tablist" aria-label="Unlock method">
+        <button class="pill-tab is-active" type="button" role="tab" id="unlock-tab-pw" aria-selected="true" aria-controls="unlock-panel-pw">Password</button>
+        <button class="pill-tab" type="button" role="tab" id="unlock-tab-phrase" aria-selected="false" aria-controls="unlock-panel-phrase" tabindex="-1">Recovery phrase</button>
       </div>
 
       <form class="login-gate__form" id="unlock-form" novalidate>
@@ -84,7 +88,7 @@ export async function mountUnlock({ onUnlocked, profile }) {
             <textarea class="field__input" id="unlock-phrase" name="phrase" rows="3"
                       placeholder="word1 word2 word3 …" autocomplete="off"></textarea>
             <div class="field__hint muted">
-              24 words from the recovery phrase you wrote down at signup.
+              27 words from the recovery phrase you wrote down at signup.
             </div>
             <div class="field__error" id="unlock-phrase-err" hidden></div>
           </div>
@@ -126,6 +130,9 @@ export async function mountUnlock({ onUnlocked, profile }) {
   // the banner, sidebar, and view container.
   document.body.classList.add("app-locked");
   document.body.appendChild(root);
+
+  // Eye toggle for the master-password field.
+  enhancePasswordInputs(root);
 
   // Submit handlers. The "active" panel decides which unwrap path runs.
   const $pwErr = root.querySelector("#unlock-pw-err");

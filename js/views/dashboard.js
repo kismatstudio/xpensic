@@ -104,7 +104,7 @@ export function renderDashboard(container, ctx) {
     <!-- Quick Add: one-line entry, e.g. "Coffee 180" -->
     <div class="dash-card" style="margin-bottom: var(--space-4)">
       <div class="dash-card__title">
-        Quick add
+        QUICK ADD
         <span class="dash-card__hint">Type a note and amount, e.g. <code>Coffee 180</code></span>
       </div>
       <form class="quick-add" id="quick-add-form" autocomplete="off">
@@ -699,6 +699,15 @@ function mountQuickAdd(wrap, ctx) {
 
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
+    // Resolve the LIVE state at submit time. `session.state` is replaced
+    // (not mutated) by hydrateFromServer()/afterUnlock()/auto-unlock, so
+    // the `ctx.state` captured when the dashboard rendered can be a stale
+    // detached copy. Writing to it would save the entry to localStorage
+    // but the re-render (which reads the current session.state) would
+    // never see it — the "instant Quick Add silently not captured" bug.
+    // `getState` is provided by main.js; fall back to ctx.state if absent
+    // (e.g. in tests).
+    const liveState = (typeof ctx.getState === "function") ? ctx.getState() : ctx.state;
     const raw = input.value;
     const trimmedRaw = (raw || "").trim();
 
@@ -728,7 +737,7 @@ function mountQuickAdd(wrap, ctx) {
     }
 
     const sug = suggestCategory(finalNote);
-    const fallbackId = ctx.state.categories[0]?.id || "";
+    const fallbackId = liveState.categories[0]?.id || "";
     const paymentMethod = (paySelect && paySelect.value) || "cash";
     const upiApp = (upiSelect && paymentMethod === "upi") ? upiSelect.value : "";
     const explicitCat = catSelect && catSelect.value ? catSelect.value : "";
@@ -749,14 +758,14 @@ function mountQuickAdd(wrap, ctx) {
 
     // Capture the running count BEFORE adding so we can show a
     // "first expense!" hint on the first add of the session.
-    const wasFirst = ctx.state.expenses.length === 0;
+    const wasFirst = liveState.expenses.length === 0;
 
-    Store.addExpense(ctx.state, expense);
+    Store.addExpense(liveState, expense);
     // Save + sync immediately (not waiting for the 500ms debounce) so
     // the toast fires the same instant the expense is on disk. The
     // sync helper is still debounced internally; this just kicks the
-    // debounce timer off right now.
-    Store.save(ctx.state);
+    // debounce timer off right away.
+    Store.save(liveState);
     _syncToServer();
 
     // Reset the form fields BEFORE re-rendering. Doing this in the

@@ -17,6 +17,7 @@ import { encryptVault } from "../crypto/vault.mjs";
 import { Store, migrate as migrateState } from "../store.js";
 import { escapeHtml } from "../util.js";
 import { toast } from "../components/toast.js";
+import { enhancePasswordInputs } from "../components/pw-toggle.js";
 
 export async function mountVaultSetup({ onComplete, profile }) {
   const root = document.createElement("div");
@@ -27,13 +28,11 @@ export async function mountVaultSetup({ onComplete, profile }) {
 
   root.innerHTML = `
     <div class="login-gate__card">
-      <div class="login-gate__type">
-        <div class="login-gate__wordmark">Set up your vault</div>
-        <div class="login-gate__tagline">
-          Your data is end-to-end encrypted. Pick a master password — you'll need it
-          to unlock on any new device.
-        </div>
-      </div>
+      <h1 class="login-gate__title" id="setup-title">Set up your vault</h1>
+      <p class="login-gate__subtitle">
+        Your data is end-to-end encrypted. Pick a master password — you'll need it
+        to unlock on any new device.
+      </p>
 
       <form class="login-gate__form" id="setup-form" novalidate>
         <div class="field">
@@ -62,7 +61,7 @@ export async function mountVaultSetup({ onComplete, profile }) {
             <span>Generate a recovery phrase (recommended)</span>
           </label>
           <div class="field__hint muted">
-            24 words that can unlock your vault if you forget the password.
+            27 words (24 payload + 3 checksum) that can unlock your vault if you forget the password.
             Write them down — anyone with the phrase can read your data.
           </div>
         </div>
@@ -71,6 +70,23 @@ export async function mountVaultSetup({ onComplete, profile }) {
           <div class="field">
             <label class="field__label">Your recovery phrase</label>
             <div class="recovery-phrase" id="setup-phrase-words"></div>
+            <div class="recovery-phrase__actions">
+              <button class="btn btn--sm" type="button" id="setup-phrase-copy" aria-label="Copy recovery phrase to clipboard">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                <span>Copy</span>
+              </button>
+              <button class="btn btn--sm" type="button" id="setup-phrase-download" aria-label="Download recovery phrase as text file">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span>Download</span>
+              </button>
+            </div>
             <div class="field__hint muted" style="display:flex;gap:8px;align-items:center;margin-top:8px;">
               <label style="display:flex;gap:6px;align-items:center;font-size:13px;">
                 <input type="checkbox" id="setup-phrase-confirm" />
@@ -100,6 +116,9 @@ export async function mountVaultSetup({ onComplete, profile }) {
   document.body.classList.add("app-locked");
   document.body.appendChild(root);
 
+  // Eye toggles for the master-password + confirm fields.
+  enhancePasswordInputs(root);
+
   // State for the generated phrase. We hold it in a closure so it's
   // never written to the DOM until the user reveals it, and so we
   // can re-render the same phrase if the user toggles the checkbox.
@@ -108,6 +127,8 @@ export async function mountVaultSetup({ onComplete, profile }) {
   const $phraseDisplay = root.querySelector("#setup-phrase-display");
   const $phraseWords = root.querySelector("#setup-phrase-words");
   const $phraseConfirm = root.querySelector("#setup-phrase-confirm");
+  const $phraseCopy = root.querySelector("#setup-phrase-copy");
+  const $phraseDownload = root.querySelector("#setup-phrase-download");
   $phraseCheck.addEventListener("change", async () => {
     if ($phraseCheck.checked) {
       if (!phraseWords) phraseWords = await generatePhrase();
@@ -119,6 +140,66 @@ export async function mountVaultSetup({ onComplete, profile }) {
       $phraseDisplay.hidden = true;
       $phraseConfirm.checked = false;
     }
+  });
+
+  // Copy the recovery phrase to the clipboard. We rebuild the
+  // space-separated string from the closure (not the DOM) so the
+  // copy is always the canonical phrase, even if the user has
+  // selected a different locale or the DOM was tampered with.
+  $phraseCopy.addEventListener("click", async () => {
+    if (!phraseWords) return;
+    const text = phraseWords.join(" ");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("Recovery phrase copied to clipboard", "success");
+    } catch {
+      // Fallback for browsers that block the async clipboard API
+      // (e.g. insecure contexts). Use a hidden textarea + execCommand.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        toast("Recovery phrase copied to clipboard", "success");
+      } catch {
+        toast("Copy failed — please select the words and copy manually", "info");
+      } finally {
+        ta.remove();
+      }
+    }
+  });
+
+  // Download the recovery phrase as a plain-text file. The file
+  // includes a header with the date and a warning so anyone who
+  // finds it later understands what it is and how sensitive it is.
+  $phraseDownload.addEventListener("click", () => {
+    if (!phraseWords) return;
+    const text = [
+      "XPENSIC — Recovery Phrase",
+      `Generated: ${new Date().toISOString()}`,
+      "",
+      "Anyone with these 27 words can read your encrypted data.",
+      "Store this file somewhere only you can access.",
+      "",
+      phraseWords.join(" "),
+      "",
+    ].join("\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `xpensic-recovery-phrase-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke the object URL on the next tick so the browser has
+    // time to start the download before we free the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast("Recovery phrase downloaded", "success");
   });
 
   function setError($el, msg) {

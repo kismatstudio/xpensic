@@ -19,6 +19,7 @@ import { generateAvatarDataUrl, escapeHtml } from "../util.js";
 import { Auth, apiBase } from "../api.js";
 import { toast } from "../components/toast.js";
 import { openModal } from "../components/modal.js";
+import { enhancePasswordInputs } from "../components/pw-toggle.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[0-9]{10}$/;
@@ -45,30 +46,24 @@ export function mountLogin({ onComplete }) {
   root.setAttribute("aria-labelledby", "login-gate-title");
   root.innerHTML = `
     <div class="login-gate__card">
-      <!-- Login-gate brand: X mark from the cropped PNG + live HTML
-           for the wordmark + tagline. Tagline is rendered as
-           "Track expenses. Take control." in mixed case (the user
-           requested this wording). Light/dark mark swap via [data-theme]. -->
+      <!-- Login-gate brand: the full SVG lockup (wordmark included) with
+           a light/dark swap via [data-theme]. The tagline is rendered as
+           live HTML so it stays editable. -->
       <img
         class="login-gate__mark login-gate__mark--light"
-        src="assets/brand/mark-light.png"
-        alt=""
-        aria-hidden="true"
-        width="96"
-        height="96"
+        src="assets/brand/xpensic-light.png"
+        alt="Xpensic"
+        width="80"
+        height="250"
       />
       <img
         class="login-gate__mark login-gate__mark--dark"
-        src="assets/brand/mark-dark.png"
-        alt=""
-        aria-hidden="true"
-        width="96"
-        height="96"
+        src="assets/brand/xpensic-dark.png"
+        alt="Xpensic"
+        width="80"
+        height="250"
       />
-      <div class="login-gate__type">
-        <div class="login-gate__wordmark">Xpensic</div>
-        <div class="login-gate__tagline">Track expenses. Take control.</div>
-      </div>
+      <div class="login-gate__type"></div>
       <h1 class="login-gate__title" id="login-gate-title">Welcome to XPENSIC</h1>
       <p class="login-gate__subtitle" id="login-gate-subtitle">
         Sign in to continue tracking your expenses across devices.
@@ -216,6 +211,10 @@ export function mountLogin({ onComplete }) {
         </div>
   `;
   document.body.appendChild(root);
+
+  // Add eye buttons to every password field (sign-in, sign-up, and
+  // the forgot-password modal created later all pick this up).
+  enhancePasswordInputs(root);
 
   // --- Helpers -----------------------------------------------------------
   const $form = root.querySelector("#auth-form");
@@ -382,13 +381,16 @@ export function mountLogin({ onComplete }) {
       } else {
         // LIVE MODE — real Resend email sent. Hide the input-row
         // copy UI and just show a confirmation + a tip about the
-        // spam folder.
+        // spam folder. If the server told us the "From" address, show
+        // it so the user knows exactly who the email came from (helps
+        // spot it in the inbox, especially with the Resend sandbox).
+        const from = res.from ? ` from <strong>${escapeHtml(res.from)}</strong>` : "";
         fields.otpHint.innerHTML =
           `<div class="login-gate__otp-banner login-gate__otp-banner--live">` +
             `<span class="login-gate__otp-pill login-gate__otp-pill--live" aria-label="Sent via email">` +
               `<span aria-hidden="true">✉</span> SENT` +
             `</span>` +
-            `<span class="login-gate__otp-text">${escapeHtml(res.message || "OTP sent. Check your inbox.")}</span>` +
+            `<span class="login-gate__otp-text">${escapeHtml(res.message || "OTP sent to your email.")}${from}</span>` +
           `</div>` +
           `<div class="muted login-gate__otp-meta">` +
             `Expires in 5 minutes. Tip: if you don't see it, check your spam folder.` +
@@ -792,6 +794,7 @@ async function mountForgotPassword(prefillIdentifier = "") {
     `;
     overlay.querySelector("[data-forgot-back]").addEventListener("click", renderStep2);
     overlay.querySelector("#forgot-reset").addEventListener("click", onReset);
+    enhancePasswordInputs(overlay);
     overlay.querySelector("#forgot-pw").focus();
   }
 

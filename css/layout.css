@@ -36,12 +36,13 @@
 
 /* Brand — the new XPENSIC lockup. The X+arrow mark comes from a
    cropped PNG (assets/brand/mark-light.png and mark-dark.png). The
-   "Xpensic" wordmark and "Track expenses. Take control." tagline are
+    "Xpensic" wordmark and "Track expenses. Take control." tagline are
    rendered as live HTML so the tagline stays editable and renders
    with the same crisp typography the rest of the UI uses. */
 .app-brand {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
+  padding-top: 0;
   /* Slight negative margin so the wider lockup sits flush with the
      hamburger icon on the left without crowding the month picker. */
   margin-left: calc(-1 * var(--space-1));
@@ -55,38 +56,29 @@
   transform: scale(1.02);
 }
 
-/* Show the right mark for the active theme. By default both variants
+/* Show the right logo for the active theme. By default both variants
    are present in the DOM so the browser pre-decodes the inactive one
    and the swap is instant the moment data-theme flips. */
-[data-theme="light"] .app-brand__mark--dark,
-.app-brand__mark--dark {
-  display: none;
-}
-[data-theme="light"] .app-brand__mark--light {
-  display: block;
-}
-[data-theme="dark"] .app-brand__mark--light,
-.app-brand__mark--light {
-  display: none;
-}
-[data-theme="dark"] .app-brand__mark--dark {
-  display: block;
-}
+[data-theme="light"] .app-brand__logo--dark,
+.app-brand__logo--dark { display: none; }
+[data-theme="light"] .app-brand__logo--light { display: block; }
+[data-theme="dark"] .app-brand__logo--light,
+.app-brand__logo--light { display: none; }
+[data-theme="dark"] .app-brand__logo--dark { display: block; }
 
-/* X+arrow mark. Slightly larger than the previous 38px tile so it
-   reads at a glance and matches the visual weight of the wordmark. */
-.app-brand__mark {
-  width: 52px;
-  height: 52px;
+/* Full SVG lockup (wordmark included). Sized by width with auto height
+   so proportions stay true and the logo stays crisp on Retina. */
+.app-brand__logo {
+  width: 200px;
+  height: auto;
+  max-width: 100%;
   display: block;
   flex: 0 0 auto;
-  /* Subtle glow + crisp-rendering hint. */
-  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.18));
   image-rendering: -webkit-optimize-contrast;
   image-rendering: crisp-edges;
 }
 
-/* Stacked wordmark + tagline. */
+/* Tagline below the logo. */
 .app-brand__type {
   display: flex;
   flex-direction: column;
@@ -94,45 +86,28 @@
   line-height: 1;
 }
 
-.app-brand__wordmark {
-  font-family: var(--font-display, "Poppins"), "Inter", system-ui, sans-serif;
-  font-weight: 800;
-  font-size: 22px;
-  letter-spacing: -0.02em;
-  /* Brand navy on light theme, white on dark theme. */
-  color: var(--brand-wordmark, #0F172A);
-}
-
 .app-brand__tagline {
-  font-size: 11px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--brand-tagline, #475569);
   opacity: 0.85;
 }
 
-/* Theme-aware colors. Using CSS custom properties so the wordmark
-   stays readable in both themes without overriding the whole `color`
-   chain. */
-[data-theme="dark"] .app-brand__wordmark {
-  color: #F8FAFC;
-}
 [data-theme="dark"] .app-brand__tagline {
   color: #94A3B8;
 }
 
 /* Intermediate breakpoints so the lockup stays balanced across
    tablet + phone widths. On phones we drop the tagline so the
-   wordmark + mark still fit comfortably. */
+   logo still fits comfortably. */
 @media (max-width: 720px) {
-  .app-brand__mark { width: 44px; height: 44px; }
-  .app-brand__wordmark { font-size: 19px; }
+  .app-brand__logo { width: 120px; }
   .app-brand__tagline { font-size: 10px; }
 }
 @media (max-width: 480px) {
   .app-brand__tagline { display: none; }
-  .app-brand__mark { width: 40px; height: 40px; }
-  .app-brand__wordmark { font-size: 18px; }
+  .app-brand__logo { width: 110px; }
 }
 
 /* ─── Hamburger icon ──────────────────────────────────────────────────── */
@@ -175,7 +150,7 @@
   -webkit-backdrop-filter: var(--glass-blur-strong);
   backdrop-filter: var(--glass-blur-strong);
   border-right: 1px solid var(--glass-border);
-  padding: calc(var(--header-h) + var(--space-3)) var(--space-3) var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -191,7 +166,7 @@
 }
 
 .app-nav__profile {
-  padding: var(--space-2);
+  padding: 0;
   border-bottom: 1px solid var(--glass-border);
   margin-bottom: var(--space-1);
 }
@@ -208,19 +183,19 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  /* Generous top padding so the brand doesn't sit pinned under the
-     drawer header strip; bottom padding sized to leave visual
-     breathing room above the divider. */
-  padding: var(--space-5) var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
+  /* Anchored at the very top of the drawer — minimal top padding so the
+     logo starts flush with the top edge and no space is wasted. Bottom
+     padding gives breathing room above the profile card divider. */
+  padding: var(--space-3) var(--space-2) var(--space-4);
+  margin-bottom: var(--space-2);
   border-bottom: 1px solid var(--glass-border);
 }
 
 .app-nav__brand-mark {
-  /* Slightly larger than the header mark — the drawer is the
-     "branded" surface, so the lockup needs more visual weight. */
-  width: 48px;
-  height: 48px;
+  /* The full SVG lockup (wordmark included) — wider than tall, so we
+     size by width and let height follow to preserve proportions. */
+  width: 160px;
+  height: auto;
   display: block;
   flex: 0 0 auto;
   filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.18));
@@ -289,15 +264,14 @@
    the brand never pushes the profile card out of view. The tagline
    keeps its full width because wrapping handles it gracefully. */
 @media (max-width: 320px) {
-  .app-nav__brand-mark { width: 40px; height: 40px; }
-  .app-nav__brand-wordmark { font-size: 19px; }
+  .app-nav__brand-mark { width: 100px; height: auto; }
   .app-nav__brand-tagline { font-size: 10px; }
 }
 .app-nav__profile-card {
-  /* Wraps the profile link + signout button together so they share
-     padding/visual rhythm without leaking layout into the surrounding
-     nav shell. The element is a plain block — no border of its own —
-     because the parent `.app-nav__profile` already carries the divider. */
+  /* Wraps the profile link so it shares padding/visual rhythm without
+     leaking layout into the surrounding nav shell. The element is a
+     plain block — no border of its own — because the parent
+     `.app-nav__profile` already carries the divider. */
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -331,6 +305,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
 }
 .app-nav__profile-name {
   font-weight: 600;
@@ -346,61 +321,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-/* Signout button — sits in the same card as the profile link, full-width
-   beneath the user info. Tertiary "ghost" style so it doesn't compete
-   with the primary nav links below. The icon is a small exit glyph that
-   inherits the muted text colour. */
-.app-nav__signout {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: 8px var(--space-3);
-  margin-top: 2px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--dur-med) var(--ease-out),
-              color var(--dur-med) var(--ease-out),
-              border-color var(--dur-med) var(--ease-out);
-  text-align: left;
-}
-.app-nav__signout:hover,
-.app-nav__signout:focus-visible {
-  background: var(--color-danger-soft, rgba(239, 68, 68, 0.12));
-  color: var(--color-danger, #ef4444);
-  border-color: var(--color-danger, #ef4444);
-  outline: none;
-}
-.app-nav__signout:active {
-  transform: translateY(0.5px);
-}
-.app-nav__signout-icon {
+.app-nav__profile-chevron {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
-  color: inherit;
+  color: var(--color-text-faint);
+  opacity: 0.7;
+  transition: transform var(--dur-med) var(--ease-out),
+              opacity var(--dur-med) var(--ease-out);
 }
-.app-nav__signout-icon svg {
+.app-nav__profile-link:hover .app-nav__profile-chevron {
+  opacity: 1;
+  transform: translateX(2px);
+}
+.app-nav__profile-chevron svg {
   width: 100%;
   height: 100%;
   display: block;
-}
-.app-nav__signout-label {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .nav-list {
@@ -413,10 +353,17 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  width: 100%;
   padding: 10px var(--space-3);
   border-radius: var(--radius-md);
   color: var(--color-text-muted);
   font-weight: 500;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
   transition: background var(--dur-med) var(--ease-out),
               color var(--dur-med) var(--ease-out),
               transform var(--dur-med) var(--ease-out);
@@ -443,6 +390,9 @@
 }
 .nav-link.is-active {
   background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
+  border-left: 3px solid var(--color-primary);
   color: var(--color-text);
 }
 .nav-link.is-active::before {
@@ -450,13 +400,170 @@
   transform: scaleY(1);
 }
 
+/* Nav link icon — crisp 20px glyph that inherits the link colour and
+   stays vertically centred with the label. Sized for a comfortable
+   touch target on mobile while staying subtle on desktop. */
+.nav-link__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: inherit;
+  opacity: 0.85;
+}
+.nav-link__icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.nav-link.is-active .nav-link__icon {
+  color: var(--color-primary);
+  opacity: 1;
+}
+.nav-link__label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sign-out nav link — sits at the bottom of the nav list. Uses the
+   danger colour on hover so it reads as a destructive action without
+   competing with the primary nav links. */
+.nav-link--signout {
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+}
+.nav-link--signout:hover,
+.nav-link--signout:focus-visible {
+  background: var(--color-danger-soft, rgba(239, 68, 68, 0.12));
+  color: var(--color-danger, #ef4444);
+  outline: none;
+}
+.nav-link--signout .nav-link__icon {
+  color: inherit;
+}
+
 .nav-link--profile { display: none; }
+
+/* ─── Quick actions ──────────────────────────────────────────────────── */
+.app-nav__quick {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+.app-nav__section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-faint);
+  padding: 0 var(--space-2) var(--space-2);
+}
+.app-nav__quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+.app-nav__quick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: var(--space-3) var(--space-2);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-soft);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--dur-med) var(--ease-out),
+              border-color var(--dur-med) var(--ease-out),
+              transform var(--dur-med) var(--ease-out),
+              box-shadow var(--dur-med) var(--ease-out);
+}
+.app-nav__quick-btn:hover {
+  background: var(--glass-bg);
+  border-color: var(--glass-border-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.app-nav__quick-btn:active {
+  transform: translateY(0.5px);
+}
+.app-nav__quick-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+.app-nav__quick-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.app-nav__quick-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nav links section — grows to fill remaining space so the footer
+   stays pinned to the bottom. */
+.app-nav__links {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.app-nav__links::-webkit-scrollbar { display: none; }
 
 .app-nav__footer {
   margin-top: auto;
   color: var(--color-text-muted);
-  padding: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-2);
   border-top: 1px solid var(--glass-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+.app-nav__encrypted {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-text-faint);
+}
+.app-nav__encrypted-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--color-success);
+}
+.app-nav__encrypted-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 /* ─── Scrim ───────────────────────────────────────────────────────────── */
@@ -517,4 +624,11 @@ body.app-locked .app { display: none; }
 @media (max-width: 720px) {
   .app-main { padding: var(--space-4) var(--space-4) 100px; }
   .app-header { padding: 0 var(--space-4); }
+
+  /* On phones the drawer is narrower, so tighten the brand + profile
+     spacing and let the quick actions breathe without crowding. */
+  .app-nav__brand { padding: var(--space-3) var(--space-1) var(--space-3); }
+  .app-nav__brand-mark { width: 140px; }
+  .app-nav__profile-link { padding: var(--space-2) var(--space-1); }
+  .app-nav__quick-btn { padding: 10px var(--space-2); }
 }

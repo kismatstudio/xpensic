@@ -122,51 +122,51 @@ function escapeAttr(s) {
 
 const HERO_AVATARS = [
   // 1. Elephant — Financial Wisdom (gold coin)
-  { id: "animal_elephant", name: "Elephant", shape: "elephant",
+  { id: "animal_elephant", name: "Elephant", file: "elephant.png", shape: "elephant",
     palette: { fur: "#a8b4c8", belly: "#e6ebf2", accent: "#5b6b80", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "coin",       letter: "E", tagline: "Financial Wisdom" },
   // 2. Owl — Smart Budgeting (book + calculator)
-  { id: "animal_owl",     name: "Owl",     shape: "owl",
+  { id: "animal_owl",     name: "Owl",     file: "owl.png",     shape: "owl",
     palette: { fur: "#8b6b3a", belly: "#f4e4c1", accent: "#3b2412", eye: "#fef3c7", cheek: "#f4a8b8" },
     prop: "calculator", letter: "O", tagline: "Smart Budgeting" },
   // 3. Fox — Best Deals & Discounts (percent tag)
-  { id: "animal_fox",     name: "Fox",     shape: "fox",
+  { id: "animal_fox",     name: "Fox",     file: "fox.png",     shape: "fox",
     palette: { fur: "#ef6b3a", belly: "#fff7ed", accent: "#7a3412", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "percent",     letter: "F", tagline: "Best Deals & Discounts" },
   // 4. Squirrel — Saving Money (stacked coins)
-  { id: "animal_squirrel", name: "Squirrel", shape: "squirrel",
+  { id: "animal_squirrel", name: "Squirrel", file: "Squirrel.png", shape: "squirrel",
     palette: { fur: "#c76339", belly: "#fce4cf", accent: "#5b2c14", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "coins",       letter: "S", tagline: "Saving Money" },
   // 5. Ant — Expense Discipline (pencil + chart)
-  { id: "animal_ant",     name: "Ant",     shape: "ant",
+  { id: "animal_ant",     name: "Ant",     file: "ant.png",     shape: "ant",
     palette: { fur: "#3a2418", belly: "#5b3a24", accent: "#1a1208", eye: "#ffffff", cheek: "#f4a8b8" },
     prop: "chart",       letter: "A", tagline: "Expense Discipline" },
   // 6. Eagle — Financial Goals (target / bullseye)
-  { id: "animal_eagle",   name: "Eagle",   shape: "eagle",
+  { id: "animal_eagle",   name: "Eagle",   file: "eagle.png",   shape: "eagle",
     palette: { fur: "#1e3a5f", belly: "#fef3c7", accent: "#0f1f3a", eye: "#fef3c7", cheek: "#f4a8b8" },
     prop: "target",      letter: "E", tagline: "Financial Goals" },
   // 7. Turtle — Long-Term Investing (piggy bank)
-  { id: "animal_turtle",  name: "Turtle",  shape: "turtle",
+  { id: "animal_turtle",  name: "Turtle",  file: "turtle.png",  shape: "turtle",
     palette: { fur: "#3a8048", belly: "#cce8d4", accent: "#1a4a24", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "piggy",       letter: "T", tagline: "Long-Term Investing" },
   // 8. Bee — Consistent Income (honey + dollar)
-  { id: "animal_bee",     name: "Bee",     shape: "bee",
+  { id: "animal_bee",     name: "Bee",     file: "bee.png",     shape: "bee",
     palette: { fur: "#f5b820", belly: "#fff7ed", accent: "#1a1208", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "honey",       letter: "B", tagline: "Consistent Income" },
   // 9. Bear — Safe Spending (shield + check)
-  { id: "animal_bear",    name: "Bear",    shape: "bear",
+  { id: "animal_bear",    name: "Bear",    file: "bear.png",    shape: "bear",
     palette: { fur: "#7a4a2a", belly: "#f4d4b0", accent: "#3b1f0a", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "shield",      letter: "B", tagline: "Safe Spending" },
   // 10. Wolf — Independent Earner (mountain badge)
-  { id: "animal_wolf",    name: "Wolf",    shape: "wolf",
+  { id: "animal_wolf",    name: "Wolf",    file: "wolf.png",    shape: "wolf",
     palette: { fur: "#5b6b80", belly: "#d4dce6", accent: "#2a3548", eye: "#fbbf24", cheek: "#f4a8b8" },
     prop: "mountain",    letter: "W", tagline: "Independent Earner" },
   // 11. Rhino — Financial Strength (storm shield)
-  { id: "animal_rhino",   name: "Rhino",   shape: "rhino",
+  { id: "animal_rhino",   name: "Rhino",   file: "rhino.png",   shape: "rhino",
     palette: { fur: "#7a8090", belly: "#c8ccd4", accent: "#2a2e36", eye: "#fbbf24", cheek: "#f4a8b8" },
     prop: "shield",      letter: "R", tagline: "Financial Strength" },
   // 12. Leopard — Fast Growth (rising bar chart)
-  { id: "animal_leopard", name: "Leopard", shape: "leopard",
+  { id: "animal_leopard", name: "Leopard", file: "leopard.png", shape: "leopard",
     palette: { fur: "#e8a020", belly: "#fef3c7", accent: "#3b2412", eye: "#1a6b3a", cheek: "#f4a8b8" },
     prop: "growth",      letter: "L", tagline: "Fast Growth" },
 ];
@@ -1042,80 +1042,12 @@ function heroSilhouetteSvg(p) {
  */
 export function generateHeroAvatarDataUrl(id) {
   const hero = getHeroAvatar(id);
-  const fur = escapeAttr(hero.palette.fur);
-  const accent = escapeAttr(hero.palette.accent);
-  const belly = escapeAttr(hero.palette.belly || "#ffffff");
-  const letter = escapeAttr(hero.letter || (hero.name || "?").slice(0, 1).toUpperCase());
-
-  // Uniquely gradient id per archetype so multiple avatars on a page
-  // don't share a <linearGradient id="bg"> reference.
-  const gradId = `g_${hero.id}`;
-  const lightId = `lt_${hero.id}`;
-  const rimId   = `rm_${hero.id}`;
-  const vignetteId = `vg_${hero.id}`;
-  const silhouette = heroSilhouetteSvg(hero);
-
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
-      <defs>
-        <!-- Primary background: top-light to bottom-shadow radial gradient -->
-        <radialGradient id="${gradId}" cx="35%" cy="28%" r="78%">
-          <stop offset="0" stop-color="${belly}" stop-opacity="0.55"/>
-          <stop offset="0.45" stop-color="${fur}"/>
-          <stop offset="1" stop-color="${accent}"/>
-        </radialGradient>
-        <!-- Studio key-light overlay (soft, almost-white) -->
-        <radialGradient id="${lightId}" cx="35%" cy="25%" r="55%">
-          <stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/>
-          <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.12"/>
-          <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-        </radialGradient>
-        <!-- Rim-light halo around the character -->
-        <radialGradient id="${rimId}" cx="50%" cy="55%" r="50%">
-          <stop offset="0.6" stop-color="#ffffff" stop-opacity="0"/>
-          <stop offset="0.85" stop-color="#ffffff" stop-opacity="0.25"/>
-          <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
-        </radialGradient>
-        <!-- Vignette: dark corners, transparent centre -->
-        <radialGradient id="${vignetteId}" cx="50%" cy="50%" r="65%">
-          <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
-          <stop offset="1" stop-color="#000000" stop-opacity="0.35"/>
-        </radialGradient>
-        <!-- Soft drop shadow so the character pops off the background -->
-        <filter id="ds_${hero.id}" x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur in="SourceAlpha" stdDeviation="1.2"/>
-          <feOffset dx="0" dy="0.8" result="off"/>
-          <feComponentTransfer in="off" result="shadow">
-            <feFuncA type="linear" slope="0.45"/>
-          </feComponentTransfer>
-          <feMerge>
-            <feMergeNode in="shadow"/>
-            <feMergeNode in="SourceGraphic"/>
-          </feMerge>
-        </filter>
-      </defs>
-      <!-- Layer 1: gradient base -->
-      <rect width="96" height="96" rx="48" fill="url(#${gradId})"/>
-      <!-- Layer 2: studio key-light highlight -->
-      <rect width="96" height="96" rx="48" fill="url(#${lightId})"/>
-      <!-- Layer 3: the character with a subtle drop shadow -->
-      <g filter="url(#ds_${hero.id})">${silhouette}</g>
-      <!-- Layer 4: rim-light halo (over character) -->
-      <rect width="96" height="96" rx="48" fill="url(#${rimId})"/>
-      <!-- Layer 5: vignette to darken corners -->
-      <rect width="96" height="96" rx="48" fill="url(#${vignetteId})"/>
-      <!-- Chest emblem: white pill with the first letter -->
-      <circle cx="48" cy="86" r="9.5" fill="#0a0f18" opacity="0.35"/>
-      <circle cx="48" cy="86" r="9" fill="#ffffff"/>
-      <circle cx="48" cy="86" r="9" fill="none" stroke="${belly}" stroke-width="0.5" opacity="0.6"/>
-      <text x="48" y="89" text-anchor="middle"
-            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-            font-size="11" font-weight="800" fill="${accent}" opacity="0.55">${letter}</text>
-      <text x="48" y="88.5" text-anchor="middle"
-            font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-            font-size="11" font-weight="800" fill="${fur}">${letter}</text>
-    </svg>`;
-  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  // Return the on-disk SVG asset path. The new avatar pack ships as real
+  // SVG files under /logos/avatars/, so we point straight at the file
+  // instead of inlining a generated data-URL. Callers use the result as
+  // an <img src>, so a path is a drop-in replacement and stays crisp on
+  // Retina displays.
+  return `/logos/avatars/${hero.file}`;
 }
 
 
