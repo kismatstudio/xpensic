@@ -80,10 +80,13 @@ export function buildApp() {
   app.use(cookieParser(JWT_SECRET));
 
   // CORS: allow the static client served from any origin during dev. In
-  // production you'd tighten this to a known origin list.
+  // production you'd tighten this to a known origin list. When
+  // CLIENT_ORIGIN is set (e.g. the Cloudflare Pages URL), we reflect that
+  // exact origin and allow credentials so cross-site cookies work.
+  const clientOrigin = process.env.CLIENT_ORIGIN;
   app.use(
     cors({
-      origin: true,
+      origin: clientOrigin ? clientOrigin : true,
       credentials: true,
     })
   );

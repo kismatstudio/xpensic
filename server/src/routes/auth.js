@@ -49,17 +49,24 @@ function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+// Cross-origin auth. The frontend (Cloudflare Pages) and API (Worker) are
+// on different sites, so cookies must use SameSite=None + Secure to travel
+// cross-site. In local dev (same-origin via the proxy) we keep SameSite=Lax.
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: process.env.CLIENT_ORIGIN ? "none" : "lax",
+  secure: process.env.CLIENT_ORIGIN ? true : process.env.NODE_ENV === "production",
+  path: "/",
+};
+
 function issueTokens(res, { userId, email }) {
   const secret = process.env.JWT_SECRET || "dev-secret-change-me";
 
   // Access token — short-lived JWT.
   const token = jwt.sign({ userId, email }, secret, { expiresIn: TOKEN_TTL });
   res.cookie(COOKIE_NAME, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    ...COOKIE_OPTS,
     maxAge: 15 * 60 * 1000,
-    path: "/",
   });
 
   // Refresh token — opaque random value, stored hashed, rotated on use.
@@ -73,11 +80,8 @@ function issueTokens(res, { userId, email }) {
     createdAt: Date.now(),
   });
   res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    ...COOKIE_OPTS,
     maxAge: REFRESH_TTL_MS,
-    path: "/",
   });
   return { token, refreshToken };
 }
