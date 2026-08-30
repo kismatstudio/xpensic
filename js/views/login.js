@@ -64,7 +64,7 @@ export function mountLogin({ onComplete }) {
         height="250"
       />
       <div class="login-gate__type"></div>
-      <h1 class="login-gate__title" id="login-gate-title">Welcome to XPENSIC</h1>
+      <h1 class="login-gate__title" id="login-gate-title">XPENSIC</h1>
       <p class="login-gate__subtitle" id="login-gate-subtitle">
         Sign in to continue tracking your expenses across devices.
       </p>
