@@ -134,7 +134,7 @@ const HERO_AVATARS = [
     palette: { fur: "#ef6b3a", belly: "#fff7ed", accent: "#7a3412", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "percent",     letter: "F", tagline: "Best Deals & Discounts" },
   // 4. Squirrel — Saving Money (stacked coins)
-  { id: "animal_squirrel", name: "Squirrel", file: "Squirrel.png", shape: "squirrel",
+  { id: "animal_squirrel", name: "Squirrel", file: "squirrel.png", shape: "squirrel",
     palette: { fur: "#c76339", belly: "#fce4cf", accent: "#5b2c14", eye: "#1a2230", cheek: "#f4a8b8" },
     prop: "coins",       letter: "S", tagline: "Saving Money" },
   // 5. Ant — Expense Discipline (pencil + chart)
