@@ -3,22 +3,16 @@
 Tiny auth + per-user data backend. Pairs with the static client in
 the parent directory (`../`).
 
-> **Stack:** Node + Express + CSV-file storage + bcryptjs + JWT
-> **Storage:** One CSV file per table inside `server/data/` — zero native deps
+> **Stack:** Node + Express + D1 (Cloudflare) / SQLite (local) + bcryptjs + JWT
+> **Storage:** Cloudflare D1 on Workers; a local SQLite adapter (`node:sqlite`)
+> for development. The storage layer is isolated to `src/d1.js` +
+> `src/crypto-d1.js`.
 > **Goal:** A no-fuss backend so the client can do real account-based
 > auth, multi-device sign-in, and per-user data persistence.
 
-> **Why CSV, not SQLite or a single JSON?** We want zero native
-> dependencies so `npm install` works without a C++ toolchain on
-> Windows. Splitting into per-table CSVs keeps each file tiny,
-> human-inspectable, and trivially diff-able in git. Writes are
-> debounced and atomic (write to `.tmp` then rename), so a crash
-> mid-write can never corrupt a file. The data layer is isolated to
-> `db.js` — swap in real Postgres / SQLite if you grow past hobby scale.
-
 ---
 
-## Run
+## Run locally
 
 ```bash
 cd server
@@ -39,13 +33,61 @@ The client talks to `http://127.0.0.1:8787` by default — see
 |------------------|----------------------------------|----------------------------------------------------|
 | `PORT`           | `8787`                           | HTTP port                                          |
 | `JWT_SECRET`     | `dev-secret-change-me`           | Signs the session cookie — **set in production**   |
-| `DB_DIR` / `DB_PATH` | `server/data/`              | Directory holding the CSV files. `DB_PATH` is honoured too — if it points at an existing *file* the server uses its parent directory (so legacy `DB_PATH=...db.json` still works) |
+| `DB_PATH`        | `:memory:`                       | Local SQLite file (dev only). Omit for in-memory.  |
 | `NODE_ENV`       | _(unset)_                | Set to `production` to enable `Secure` cookies     |
 | `RESEND_API_KEY` | _(unset)_                | Required for real OTP emails. When unset the       |
 |                  |                          | server falls back to demo mode (code returned in   |
 |                  |                          | the response) so local development keeps working. |
 | `RESEND_FROM`    | `XPENSIC <onboarding@resend.dev>` | "From" address for OTP emails. Set to a |
 |                  |                          | verified sender on your own domain in production. |
+
+---
+
+## Deploy to Cloudflare Workers + D1
+
+The API runs as a Cloudflare Worker using the Express-on-Workers
+pattern (`nodejs_compat` + `httpServerHandler`). Storage is Cloudflare
+D1.
+
+### 1. Create the D1 database
+
+```bash
+cd server
+npx wrangler d1 create xpensic-staging-db
+```
+
+Copy the returned `database_id` into `wrangler.toml` (the binding is
+`xpensic_staging_db`).
+
+### 2. Apply the schema
+
+```bash
+npx wrangler d1 execute xpensic-staging-db --remote --file=./schemas/schema.sql
+```
+
+### 3. Set secrets
+
+```bash
+npx wrangler secret put JWT_SECRET
+npx wrangler secret put RESEND_API_KEY   # optional, for live OTP emails
+npx wrangler secret put RESEND_FROM      # optional
+```
+
+### 4. Deploy
+
+```bash
+npm run deploy
+```
+
+The Worker URL is printed (e.g. `https://xpensic-api.<subdomain>.workers.dev`).
+
+### 5. Point the frontend at the API
+
+On Cloudflare Pages, set `window.ET_API_BASE` to the Worker URL. The
+easiest way is to inject it at build time — add a build step that
+writes it into `index.html`, or set it via a Pages build env var and a
+small inline script. In local dev it stays empty (the static server
+proxies `/api/*`).
 
 ---
 

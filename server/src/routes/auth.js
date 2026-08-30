@@ -19,7 +19,7 @@ import {
   putRefreshToken,
   getRefreshToken,
   deleteRefreshToken,
-} from "../db.js";
+} from "../d1.js";
 import {
   validateIdentifier,
   validateName,
@@ -85,25 +85,25 @@ function issueTokens(res, { userId, email }) {
 // POST /api/auth/refresh — rotate the refresh token, issue a fresh access
 // token. The old refresh token is revoked (single-use); a reused token is
 // treated as a possible theft and revokes the whole session family.
-authRouter.post("/refresh", (req, res) => {
+authRouter.post("/refresh", async (req, res) => {
   const oldToken = req.cookies?.[REFRESH_COOKIE_NAME];
   if (!oldToken) {
     return res.status(401).json({ ok: false, error: "No refresh token." });
   }
   const key = hashToken(oldToken);
-  const session = refreshStore.get(key);
+  const session = await refreshStore.get(key);
   if (!session) {
     return res.status(401).json({ ok: false, error: "Refresh token invalid or expired." });
   }
   if (Date.now() > session.expiresAt) {
-    refreshStore.delete(key);
+    await refreshStore.delete(key);
     return res.status(401).json({ ok: false, error: "Refresh token expired." });
   }
 
   // Rotation: revoke this token, issue a new one.
-  refreshStore.delete(key);
+  await refreshStore.delete(key);
   const newRefresh = crypto.randomBytes(48).toString("base64url");
-  refreshStore.set(hashToken(newRefresh), {
+  await refreshStore.set(hashToken(newRefresh), {
     ...session,
     parent: key,
     createdAt: Date.now(),
@@ -145,7 +145,7 @@ function publicUser(row) {
 
 // POST /api/auth/signup
 // Body: { identifier (email or phone), password, confirmPassword, displayName? }
-authRouter.post("/signup", (req, res) => {
+authRouter.post("/signup", async (req, res) => {
   const { identifier, password, confirmPassword, displayName } = req.body || {};
   const id = validateIdentifier(identifier);
   if (!id) {
@@ -163,13 +163,13 @@ authRouter.post("/signup", (req, res) => {
   // Phone-only accounts get a synthetic `phone:<digits>` email key so
   // they share the lookup path with real emails.
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  if (findUserByEmail(emailKey)) {
+  if (await findUserByEmail(emailKey)) {
     return res.status(409).json({ ok: false, error: "An account with this email/phone already exists." });
   }
 
   const userId = newId("user");
   const passwordHash = bcrypt.hashSync(pw, 10);
-  const user = createUser({
+  const user = await createUser({
     userId,
     email: emailKey,
     phone: id.kind === "phone" ? id.value : "",
@@ -185,7 +185,7 @@ authRouter.post("/signup", (req, res) => {
 
 // POST /api/auth/signin
 // Body: { identifier, password }
-authRouter.post("/signin", (req, res) => {
+authRouter.post("/signin", async (req, res) => {
   const { identifier, password } = req.body || {};
   const id = validateIdentifier(identifier);
   if (!id) {
@@ -196,7 +196,7 @@ authRouter.post("/signin", (req, res) => {
   }
 
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  const user = findUserByEmail(emailKey);
+  const user = await findUserByEmail(emailKey);
   if (!user) {
     return res.status(401).json({
       ok: false,
@@ -231,7 +231,7 @@ authRouter.post("/send-otp", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Enter a valid email or 10-digit mobile number." });
   }
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  if (!findUserByEmail(emailKey)) {
+  if (!(await findUserByEmail(emailKey))) {
     return res.status(401).json({ ok: false, error: "This email/phone is not registered. Please sign up first." });
   }
   const code = String(Math.floor(1000 + Math.random() * 9000));
@@ -287,7 +287,7 @@ authRouter.post("/send-otp", async (req, res) => {
 
 // POST /api/auth/verify-otp
 // Body: { identifier, code }
-authRouter.post("/verify-otp", (req, res) => {
+authRouter.post("/verify-otp", async (req, res) => {
   const { identifier, code } = req.body || {};
   const id = validateIdentifier(identifier);
   if (!id) {
@@ -306,7 +306,7 @@ authRouter.post("/verify-otp", (req, res) => {
     return res.status(400).json({ ok: false, error: "OTP does not match. Please try again." });
   }
   otpStore.delete(emailKey);
-  const user = findUserByEmail(emailKey);
+  const user = await findUserByEmail(emailKey);
   if (!user) {
     return res.status(401).json({ ok: false, error: "This email/phone is not registered. Please sign up first." });
   }
@@ -315,11 +315,11 @@ authRouter.post("/verify-otp", (req, res) => {
 });
 
 // POST /api/auth/whoami  — returns the current user (or 401).
-authRouter.get("/whoami", attachUser, (req, res) => {
+authRouter.get("/whoami", attachUser, async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ ok: false, error: "Not authenticated." });
   }
-  const user = findUserById(req.user.userId);
+  const user = await findUserById(req.user.userId);
   if (!user) {
     return res.status(401).json({ ok: false, error: "Account no longer exists." });
   }
@@ -327,9 +327,9 @@ authRouter.get("/whoami", attachUser, (req, res) => {
 });
 
 // POST /api/auth/signout — clears the cookies and revokes the refresh token.
-authRouter.post("/signout", (req, res) => {
+authRouter.post("/signout", async (req, res) => {
   const oldToken = req.cookies?.[REFRESH_COOKIE_NAME];
-  if (oldToken) refreshStore.delete(hashToken(oldToken));
+  if (oldToken) await refreshStore.delete(hashToken(oldToken));
   res.clearCookie(COOKIE_NAME, { path: "/" });
   res.clearCookie(REFRESH_COOKIE_NAME, { path: "/" });
   return res.json({ ok: true });
@@ -340,7 +340,7 @@ authRouter.post("/signout", (req, res) => {
 // Accepts both `displayName` (server-canonical) and `name` (the field
 // name the client uses on its in-memory profile) so the existing
 // Profile view doesn't have to know the server's naming convention.
-authRouter.patch("/profile", attachUser, (req, res) => {
+authRouter.patch("/profile", attachUser, async (req, res) => {
   if (!req.user) {
     return res.status(401).json({ ok: false, error: "Not authenticated." });
   }
@@ -379,7 +379,7 @@ authRouter.patch("/profile", attachUser, (req, res) => {
   if (Object.keys(patch).length === 0) {
     return res.status(400).json({ ok: false, error: "Nothing to update." });
   }
-  const user = updateUser(req.user.userId, patch);
+  const user = await updateUser(req.user.userId, patch);
   if (!user) return res.status(404).json({ ok: false, error: "User not found." });
   return res.json({ ok: true, user: publicUser(user) });
 });
@@ -448,7 +448,7 @@ authRouter.post("/forgot/send-otp", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Enter a valid email or 10-digit mobile number." });
   }
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  const user = findUserByEmail(emailKey);
+  const user = await findUserByEmail(emailKey);
   // Always return a generic-looking message to avoid leaking which
   // identifiers are registered. The client behaves the same way either
   // way; in demo mode (no API key) we still return the code so dev
@@ -528,7 +528,7 @@ authRouter.post("/forgot/verify", (req, res) => {
 // Verifies the OTP a second time (defence in depth — the resetToken is
 // short-lived and the OTP is single-use), then updates the user's
 // passwordHash.
-authRouter.post("/forgot/reset", (req, res) => {
+authRouter.post("/forgot/reset", async (req, res) => {
   const { identifier, code, resetToken, newPassword } = req.body || {};
   const id = validateIdentifier(identifier);
   if (!id) {
@@ -551,11 +551,11 @@ authRouter.post("/forgot/reset", (req, res) => {
   if (!pw) {
     return res.status(400).json({ ok: false, error: "Password must be at least 8 characters." });
   }
-  const user = findUserByEmail(emailKey);
+  const user = await findUserByEmail(emailKey);
   if (!user) {
     return res.status(404).json({ ok: false, error: "Account no longer exists." });
   }
-  updateUser(user.userId, { passwordHash: bcrypt.hashSync(pw, 10) });
+  await updateUser(user.userId, { passwordHash: bcrypt.hashSync(pw, 10) });
   forgotStore.delete(emailKey);
   return res.json({ ok: true, message: "Password updated. You can sign in now." });
 });

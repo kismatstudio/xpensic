@@ -1,0 +1,27 @@
+name = "xpensic-staging-api"
+main = "src/worker.js"
+# 2026-08-04 or later enables nodejs_compat_v2 by default, which bundles
+# the extra polyfills (streams, etc.) that body-parser/iconv-lite need.
+compatibility_date = "2026-08-04"
+compatibility_flags = ["nodejs_compat"]
+
+# body-parser pulls in raw-body -> iconv-lite, which uses require_streams
+# and fails to bundle on Workers. We never call express.json() (server.js
+# uses a custom body parser), so alias body-parser to a safe stub.
+alias = { "body-parser" = "./src/body-parser-stub.js" }
+
+# D1 database — created with:
+#   npx wrangler d1 create xpensic-staging-db
+# Schema applied with:
+#   npx wrangler d1 execute xpensic-staging-db --remote --file=./schemas/schema.sql
+[[d1_databases]]
+binding = "xpensic_staging_db"
+database_name = "xpensic-staging-db"
+database_id = "b45f0226-ab97-47c0-a2e7-4dde152ceee3"
+
+# Secrets — set with `npx wrangler secret put JWT_SECRET` (and
+# RESEND_API_KEY / RESEND_FROM if you want live OTP emails).
+# JWT_SECRET is required in production.
+[vars]
+# JWT_SECRET = "set-via-wrangler-secret"
+# RESEND_FROM = "XPENSIC <onboarding@resend.dev>"

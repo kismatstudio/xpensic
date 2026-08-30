@@ -9,7 +9,7 @@ import {
   addExpense,
   updateExpense,
   deleteExpense,
-} from "../db.js";
+} from "../d1.js";
 
 export const expensesRouter = Router();
 
@@ -23,12 +23,12 @@ function validateExpense(body) {
 }
 
 // GET /api/expenses — list all expenses for the current user.
-expensesRouter.get("/", (req, res) => {
-  res.json({ ok: true, expenses: listExpenses(req.user.userId) });
+expensesRouter.get("/", async (req, res) => {
+  res.json({ ok: true, expenses: await listExpenses(req.user.userId) });
 });
 
 // POST /api/expenses — add a new expense.
-expensesRouter.post("/", (req, res) => {
+expensesRouter.post("/", async (req, res) => {
   const err = validateExpense(req.body);
   if (err) return res.status(400).json({ ok: false, error: err });
   const now = new Date().toISOString();
@@ -36,7 +36,7 @@ expensesRouter.post("/", (req, res) => {
   // expenses by id; if the server mints a fresh id for an expense the
   // client already tracks, the next sync sees the client's id as
   // "missing" and re-pushes it — creating duplicates on every boot.
-  const expense = addExpense(req.user.userId, {
+  const expense = await addExpense(req.user.userId, {
     id: (typeof req.body.id === "string" && req.body.id) ? req.body.id : newId("exp"),
     amount: req.body.amount,
     date: req.body.date,
@@ -52,10 +52,10 @@ expensesRouter.post("/", (req, res) => {
 });
 
 // PUT /api/expenses/:id — replace a single expense.
-expensesRouter.put("/:id", (req, res) => {
+expensesRouter.put("/:id", async (req, res) => {
   const err = validateExpense(req.body);
   if (err) return res.status(400).json({ ok: false, error: err });
-  const updated = updateExpense(req.user.userId, req.params.id, {
+  const updated = await updateExpense(req.user.userId, req.params.id, {
     amount: req.body.amount,
     date: req.body.date,
     categoryId: req.body.categoryId,
@@ -69,8 +69,8 @@ expensesRouter.put("/:id", (req, res) => {
 });
 
 // DELETE /api/expenses/:id — remove a single expense.
-expensesRouter.delete("/:id", (req, res) => {
-  const ok = deleteExpense(req.user.userId, req.params.id);
+expensesRouter.delete("/:id", async (req, res) => {
+  const ok = await deleteExpense(req.user.userId, req.params.id);
   if (!ok) return res.status(404).json({ ok: false, error: "Expense not found." });
   return res.json({ ok: true });
 });

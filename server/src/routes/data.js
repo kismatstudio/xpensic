@@ -5,12 +5,12 @@
 // /api/categories, /api/budgets, /api/settings, /api/auth/profile).
 
 import { Router } from "express";
-import { getAssembledBlob } from "../db.js";
+import { getAssembledBlob } from "../d1.js";
 
 export const dataRouter = Router();
 
 // GET /api/data — returns the full v5 blob for the current user.
-dataRouter.get("/", (req, res) => {
-  const blob = getAssembledBlob(req.user.userId);
+dataRouter.get("/", async (req, res) => {
+  const blob = await getAssembledBlob(req.user.userId);
   return res.json({ ok: true, data: blob });
 });

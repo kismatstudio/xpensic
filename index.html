@@ -194,6 +194,13 @@
          modules even with Cache-Control: no-store. Bump the version number
          whenever you change main.js (or any module it imports) so the
          browser fetches fresh copies instead of serving stale ones. -->
-    <script type="module" src="js/main.js?v=6"></script>
+    <script>
+      // API base URL. In local dev the static server proxies /api/* to the
+      // backend, so this stays empty (same origin). On Cloudflare Pages the
+      // API runs as a separate Worker, so set ET_API_BASE to its URL here
+      // (or inject it at build time via a Pages build env var).
+      window.ET_API_BASE = window.ET_API_BASE || "https://xpensic-staging-api.kismat-studio.workers.dev";
+    </script>
+    <script type="module" src="js/main.js?v=7"></script>
   </body>
 </html>

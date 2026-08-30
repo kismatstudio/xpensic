@@ -11,16 +11,16 @@
 //   PUT  /api/crypto/vault        → upload a new encrypted vault blob
 
 import { Router } from "express";
-import { listWraps, replaceAllWraps, getVault, setVault } from "../crypto-db.js";
+import { listWraps, replaceAllWraps, getVault, setVault } from "../crypto-d1.js";
 
 export const cryptoRouter = Router();
 
 // --- Master key wraps ------------------------------------------------------
 
 // GET /api/crypto/master-key — list wraps for the signed-in user.
-cryptoRouter.get("/master-key", (req, res) => {
+cryptoRouter.get("/master-key", async (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, error: "Not authenticated." });
-  const wraps = listWraps(req.user.userId);
+  const wraps = await listWraps(req.user.userId);
   return res.json({ ok: true, wraps });
 });
 
@@ -28,7 +28,7 @@ cryptoRouter.get("/master-key", (req, res) => {
 // Body: { wraps: [envelope, ...] } where each envelope is the opaque
 // wrap envelope produced by the client (it includes its own
 // wrapType, alg, kdf, salt, nonce, ct, params, createdAt fields).
-cryptoRouter.put("/master-key", (req, res) => {
+cryptoRouter.put("/master-key", async (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, error: "Not authenticated." });
   const wraps = Array.isArray(req.body?.wraps) ? req.body.wraps : null;
   if (!wraps) return res.status(400).json({ ok: false, error: "wraps array is required." });
@@ -54,28 +54,28 @@ cryptoRouter.put("/master-key", (req, res) => {
       return res.status(400).json({ ok: false, error: "Envelope must include a salt." });
     }
   }
-  replaceAllWraps(req.user.userId, wraps);
-  return res.json({ ok: true, wraps: listWraps(req.user.userId) });
+  await replaceAllWraps(req.user.userId, wraps);
+  return res.json({ ok: true, wraps: await listWraps(req.user.userId) });
 });
 
 // --- Vault blob ------------------------------------------------------------
 
 // GET /api/crypto/vault — fetch the encrypted vault blob.
-cryptoRouter.get("/vault", (req, res) => {
+cryptoRouter.get("/vault", async (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, error: "Not authenticated." });
-  const vault = getVault(req.user.userId);
+  const vault = await getVault(req.user.userId);
   // Always return a vault field (null when empty) so the client can
   // distinguish "no vault yet" from "fetch failed".
   return res.json({ ok: true, vault: vault || null });
 });
 
 // PUT /api/crypto/vault — upload a new encrypted vault blob.
-cryptoRouter.put("/vault", (req, res) => {
+cryptoRouter.put("/vault", async (req, res) => {
   if (!req.user) return res.status(401).json({ ok: false, error: "Not authenticated." });
   const envelope = req.body;
   if (!envelope || typeof envelope !== "object" || !envelope.ct || !envelope.nonce) {
     return res.status(400).json({ ok: false, error: "vault envelope must include ct + nonce." });
   }
-  setVault(req.user.userId, envelope);
+  await setVault(req.user.userId, envelope);
   return res.json({ ok: true });
 });
