@@ -11,7 +11,9 @@
     "smoke": "node tests/smoke.mjs",
     "cf-typegen": "wrangler types",
     "deploy": "wrangler deploy",
-    "dev:worker": "wrangler dev"
+    "deploy:prod": "wrangler deploy -c wrangler.production.toml",
+    "dev:worker": "wrangler dev",
+    "dev:worker:prod": "wrangler dev -c wrangler.production.toml"
   },
   "engines": {
     "node": ">=18"

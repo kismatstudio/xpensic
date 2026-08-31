@@ -195,11 +195,14 @@
          whenever you change main.js (or any module it imports) so the
          browser fetches fresh copies instead of serving stale ones. -->
     <script>
-      // API base URL. In local dev the static server proxies /api/* to the
-      // backend, so this stays empty (same origin). On Cloudflare Pages the
-      // API runs as a separate Worker, so set ET_API_BASE to its URL here
-      // (or inject it at build time via a Pages build env var).
-      window.ET_API_BASE = window.ET_API_BASE || "https://xpensic-staging-api.kismat-studio.workers.dev";
+      // API base URL. Defaults to same-origin (empty) — in local dev the
+      // static server proxies /api/* to the backend, and on Cloudflare
+      // Pages a Pages Function (functions/api/[[path]].js) proxies /api/*
+      // to the API Worker selected per-environment via the API_ORIGIN
+      // Pages env var. Set window.ET_API_BASE ONLY to hard-override the
+      // base for a one-off deployment. This keeps staging and production
+      // working with zero code changes.
+      window.ET_API_BASE = window.ET_API_BASE || "";
     </script>
     <script type="module" src="js/main.js?v=8"></script>
   </body>

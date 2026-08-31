@@ -1,0 +1,38 @@
+# Production Worker config — deploys to the existing `xpensic-api` Worker.
+#
+# Deploy with:
+#   npx wrangler deploy -c wrangler.production.toml
+# (or: npm run deploy:prod)
+#
+# Pre-requisites:
+#   1. Create the production D1 database:
+#        npx wrangler d1 create xpensic-prod-db -c wrangler.production.toml
+#      Copy the returned database_id into the [[d1_databases]] block below.
+#   2. Apply the schema:
+#        npx wrangler d1 execute xpensic-prod-db --remote -c wrangler.production.toml --file=./schemas/schema.sql
+#   3. Set secrets:
+#        npx wrangler secret put JWT_SECRET -c wrangler.production.toml
+#        npx wrangler secret put RESEND_API_KEY -c wrangler.production.toml
+#        npx wrangler secret put RESEND_FROM -c wrangler.production.toml
+#        npx wrangler secret put CLIENT_ORIGIN -c wrangler.production.toml   # https://app.xpensic.com
+
+name = "xpensic-api"
+main = "src/worker.js"
+compatibility_date = "2026-08-04"
+compatibility_flags = ["nodejs_compat"]
+
+# body-parser pulls in raw-body -> iconv-lite, which uses require_streams
+# and fails to bundle on Workers. We never call express.json() (server.js
+# uses a custom body parser), so alias body-parser to a safe stub.
+alias = { "body-parser" = "./src/body-parser-stub.js" }
+
+# Production D1 database — create it first with `wrangler d1 create`.
+[[d1_databases]]
+binding = "XPENSIC_DB"
+database_name = "xpensic-prod-db"
+database_id = "3dbedfae-65d9-4b82-bb66-fcb23ce52277"
+
+# Secrets — set with wrangler secret put (JWT_SECRET, RESEND_API_KEY,
+# RESEND_FROM, CLIENT_ORIGIN). Do NOT commit real values here.
+[vars]
+# Example non-secret var if needed (leave commented out).

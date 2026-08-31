@@ -4,9 +4,11 @@
 // Cloudflare's httpServerHandler so Express runs on the Workers runtime.
 //
 // Requires:
-//   - wrangler.toml with `compatibility_flags = ["nodejs_compat"]`
-//   - a D1 binding named `xpensic_staging_db`
-//   - env vars: JWT_SECRET, RESEND_API_KEY (optional), RESEND_FROM (optional)
+//   - wrangler config with `compatibility_flags = ["nodejs_compat"]`
+//   - a D1 binding named `XPENSIC_DB` (each environment/config binds its
+//     own database under this name)
+//   - env vars: JWT_SECRET, RESEND_API_KEY (optional), RESEND_FROM (optional),
+//     CLIENT_ORIGIN (the frontend origin for cross-site cookies)
 
 import { env } from "cloudflare:workers";
 import { httpServerHandler } from "cloudflare:node";
@@ -15,8 +17,8 @@ import { initDb } from "./d1.js";
 import { initCryptoDb } from "./crypto-d1.js";
 
 // Bind the D1 database before any request is handled.
-initDb(env.xpensic_staging_db);
-initCryptoDb(env.xpensic_staging_db);
+initDb(env.XPENSIC_DB);
+initCryptoDb(env.XPENSIC_DB);
 
 const app = buildApp();
 

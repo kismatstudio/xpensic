@@ -15,7 +15,7 @@ alias = { "body-parser" = "./src/body-parser-stub.js" }
 # Schema applied with:
 #   npx wrangler d1 execute xpensic-staging-db --remote --file=./schemas/schema.sql
 [[d1_databases]]
-binding = "xpensic_staging_db"
+binding = "XPENSIC_DB"
 database_name = "xpensic-staging-db"
 database_id = "b45f0226-ab97-47c0-a2e7-4dde152ceee3"
 

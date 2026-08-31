@@ -43,6 +43,32 @@ The client talks to `http://127.0.0.1:8787` by default — see
 
 ---
 
+## Frontend ↔ API wiring (Cloudflare Pages)
+
+The frontend defaults to a **same-origin `/api`** path (`window.ET_API_BASE`
+is empty by default). Two things make that work:
+
+1. **Local dev**: `dev-server.cjs` proxies `/api/*` → the local API
+   (`localhost:8787`).
+2. **Cloudflare Pages**: a **Pages Function**
+   (`functions/api/[[path]].js`) proxies `/api/*` → the API Worker.
+
+The Pages Function reads the target Worker URL from the **`API_ORIGIN`**
+Pages env var. Set it per-environment in the Cloudflare dashboard (e.g.
+Production = `https://api.xpensic.com`, Preview/Staging = the staging
+Worker URL). Because the base URL is env-driven, **no code changes are
+needed** when switching between staging and production.
+
+Because `/api` is same-origin on Pages, cookies stay first-party
+(`SameSite=Lax`), so browser auth works without cross-site cookie setup.
+The Worker's `CLIENT_ORIGIN` secret is only needed if you call the Worker
+directly (e.g. via `api.xpensic.com`) instead of through the Pages proxy.
+
+Set `window.ET_API_BASE` only to hard-override the base for a one-off
+deployment.
+
+---
+
 ## Deploy to Cloudflare Workers + D1
 
 The API runs as a Cloudflare Worker using the Express-on-Workers
