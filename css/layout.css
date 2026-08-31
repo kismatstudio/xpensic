@@ -476,7 +476,7 @@
   width: 100%;
   padding: var(--space-3) var(--space-2);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--glass-border);
+  border: 0.5px solid var(--glass-border);
   background: var(--glass-bg-soft);
   color: var(--color-text);
   font-family: inherit;

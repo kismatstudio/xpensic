@@ -31,7 +31,7 @@ export default function Sidebar() {
         <div className="text-xs font-semibold text-slate-200 uppercase tracking-wider mb-2">Quick Actions</div>
         <div className="flex gap-2">
           <button className="flex-1 py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition">Add</button>
-          <button className="flex-1 py-2 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-medium hover:bg-slate-300 dark:hover:bg-slate-700 transition">Scan</button>
+          <button onClick={() => alert('Coming Soon')} className="flex-1 py-2 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-medium hover:bg-slate-300 dark:hover:bg-slate-700 transition">Scan</button>
         </div>
       </div>
     </aside>
