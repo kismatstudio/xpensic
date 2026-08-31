@@ -512,6 +512,15 @@
   height: 100%;
   display: block;
 }
+/* Keep the icon glyph crisp on hover — the camera's thin strokes
+   can look washed out against the glass background + shadow that
+   the button picks up, so keep the primary colour at full strength. */
+.app-nav__quick-btn:hover .app-nav__quick-icon,
+.app-nav__quick-btn:focus-visible .app-nav__quick-icon {
+  color: var(--color-primary);
+  opacity: 1;
+  filter: drop-shadow(0 0 1px var(--color-primary-soft));
+}
 .app-nav__quick-label {
   flex: 1;
   min-width: 0;
