@@ -11,13 +11,13 @@ compatibility_flags = ["nodejs_compat"]
 alias = { "body-parser" = "./src/body-parser-stub.js" }
 
 # D1 database — created with:
-#   npx wrangler d1 create xpensic-staging-db
+#   npx wrangler d1 create xpensic-staging-e2ee-db
 # Schema applied with:
-#   npx wrangler d1 execute xpensic-staging-db --remote --file=./schemas/schema.sql
+#   npx wrangler d1 execute xpensic-staging-e2ee-db --remote --file=./schemas/schema.sql
 [[d1_databases]]
 binding = "XPENSIC_DB"
-database_name = "xpensic-staging-db"
-database_id = "b45f0226-ab97-47c0-a2e7-4dde152ceee3"
+database_name = "xpensic-staging-e2ee-db"
+database_id = "8c2b1ff0-78e2-46ac-b86f-548e43839b76"
 
 # Secrets — set with `npx wrangler secret put JWT_SECRET` (and
 # RESEND_API_KEY / RESEND_FROM if you want live OTP emails).
