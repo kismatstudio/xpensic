@@ -26,6 +26,7 @@ const store = read("js/store.js");
 const vault = read("js/crypto/vault.mjs");
 const schema = read("server/schemas/schema.sql");
 const server = read("server/src/server.js");
+const index = read("index.html");
 
 console.log("\n[1] application wiring has one encrypted data boundary");
 check("main saves through the encrypted vault", /saveEncryptedVault/.test(main));
@@ -41,6 +42,12 @@ check("Store does not write application state to localStorage",
   !/localStorage\.setItem\(STORAGE_KEY/.test(store));
 check("server does not mount plaintext data routes",
   !/app\.use\("\/api\/(data|expenses|categories|budgets|settings|splits)"/.test(server));
+check("sidebar E2EE label is an accessible button",
+  /<button[\s\S]*id="app-nav-encrypted"[\s\S]*aria-label="Learn about end-to-end encryption"/.test(index));
+check("sidebar E2EE button opens an in-app modal",
+  /app-nav-encrypted[\s\S]*openEncryptionInfoModal/.test(main));
+check("encryption modal links to the public repository",
+  /https:\/\/github\.com\/kismatstudio\/xpensic/.test(main));
 check("schema has no plaintext financial tables",
   !/CREATE TABLE IF NOT EXISTS (expenses|categories|budgets|splits|blobs)/i.test(schema));
 check("schema keeps encrypted vault storage", /CREATE TABLE IF NOT EXISTS vault_blobs/.test(schema));

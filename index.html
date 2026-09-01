@@ -166,12 +166,17 @@
         </nav>
 
         <div class="app-nav__footer">
-          <div class="app-nav__encrypted">
+            <button class="app-nav__encrypted" type="button" id="app-nav-encrypted"
+              aria-label="Learn about end-to-end encryption"
+              title="Learn about end-to-end encryption">
             <span class="app-nav__encrypted-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
             </span>
             <span class="app-nav__encrypted-label">End-to-End Encrypted</span>
-          </div>
+            <span class="app-nav__encrypted-info" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7" x2="12.01" y2="7"/></svg>
+            </span>
+          </button>
         </div>
       </aside>
 
@@ -204,6 +209,6 @@
       // working with zero code changes.
       window.ET_API_BASE = window.ET_API_BASE || "";
     </script>
-    <script type="module" src="js/main.js?v=10"></script>
+    <script type="module" src="js/main.js?v=11"></script>
   </body>
 </html>

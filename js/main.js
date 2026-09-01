@@ -313,7 +313,8 @@ function mountNavToggle() {
     if (e.target.closest(".nav-link") ||
         e.target.closest(".app-nav__profile-link") ||
         e.target.closest(".app-nav__quick-btn") ||
-        e.target.closest(".app-nav__signout")) {
+        e.target.closest(".app-nav__signout") ||
+        e.target.closest(".app-nav__encrypted")) {
       closeDrawer();
     }
   });
@@ -353,6 +354,73 @@ function mountNavActions() {
   if (signoutBtn) {
     signoutBtn.addEventListener("click", () => confirmSignOut());
   }
+
+  const encryptedBtn = nav.querySelector("#app-nav-encrypted");
+  if (encryptedBtn && encryptedBtn.dataset.bound !== "true") {
+    encryptedBtn.addEventListener("click", () => openEncryptionInfoModal());
+    encryptedBtn.dataset.bound = "true";
+  }
+}
+
+function openEncryptionInfoModal() {
+  openModal({
+    title: "End-to-end encryption",
+    body: `
+      <div class="e2ee-info">
+        <p class="e2ee-info__intro">
+          Your vault is encrypted in this browser before it is uploaded. Here is
+          the boundary between data Xpensic cannot read and service metadata the
+          team can see.
+        </p>
+        <p class="e2ee-info__source">
+          Public source code:
+          <a href="https://github.com/kismatstudio/xpensic" target="_blank" rel="noopener noreferrer">View Xpensic on GitHub</a>
+        </p>
+        <div class="e2ee-boundary">
+          <section class="e2ee-boundary__panel e2ee-boundary__panel--private" aria-labelledby="e2ee-private-title">
+            <div class="e2ee-boundary__heading">
+              <span class="e2ee-boundary__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="m9 15 2 2 4-4"/></svg>
+              </span>
+              <div>
+                <h3 id="e2ee-private-title">Not readable by Xpensic</h3>
+                <p>Encrypted before it leaves your browser</p>
+              </div>
+            </div>
+            <ul class="e2ee-boundary__list">
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#10003;</span><span>Expense amounts, notes, and payment details</span></li>
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#10003;</span><span>Categories, budgets, and splits</span></li>
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#10003;</span><span>Profile details, settings, and in-app login history</span></li>
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#10003;</span><span>Vault password, recovery phrase, and decrypted contents</span></li>
+            </ul>
+          </section>
+          <section class="e2ee-boundary__panel e2ee-boundary__panel--visible" aria-labelledby="e2ee-visible-title">
+            <div class="e2ee-boundary__heading">
+              <span class="e2ee-boundary__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+              </span>
+              <div>
+                <h3 id="e2ee-visible-title">Visible to the Xpensic team</h3>
+                <p>Needed for accounts and encrypted sync</p>
+              </div>
+            </div>
+            <ul class="e2ee-boundary__list">
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#8226;</span><span>Your account email or phone identifier</span></li>
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#8226;</span><span>Password hash and session metadata, never your password</span></li>
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#8226;</span><span>Vault revision, timestamps, and encrypted payload size</span></li>
+              <li><span class="e2ee-boundary__item-icon" aria-hidden="true">&#8226;</span><span>Encrypted key wraps and vault ciphertext</span></li>
+            </ul>
+          </section>
+        </div>
+        <p class="e2ee-info__warning">
+          <strong>Key loss:</strong> Your vault password and recovery phrase are
+          never sent to us. If both are lost and no trusted device can unlock
+          the vault, nobody, including XPENSIC, can recover it.
+        </p>
+      </div>
+    `,
+    actions: [{ label: "Close", value: false, kind: "default" }],
+  });
 }
 
 function mountThemeToggle() {
