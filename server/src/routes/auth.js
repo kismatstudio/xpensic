@@ -58,7 +58,7 @@ const COOKIE_OPTS = {
   path: "/",
 };
 
-function issueTokens(res, { userId, email }) {
+async function issueTokens(res, { userId, email }) {
   const secret = process.env.JWT_SECRET || "dev-secret-change-me";
 
   // Access token — short-lived JWT.
@@ -71,7 +71,7 @@ function issueTokens(res, { userId, email }) {
   // Refresh token — opaque random value, stored hashed, rotated on use.
   const refreshToken = crypto.randomBytes(48).toString("base64url");
   const expiresAt = Date.now() + REFRESH_TTL_MS;
-  refreshStore.set(hashToken(refreshToken), {
+  await refreshStore.set(hashToken(refreshToken), {
     userId,
     email,
     expiresAt,
@@ -170,7 +170,7 @@ authRouter.post("/signup", async (req, res) => {
     createdAt: new Date().toISOString(),
   });
 
-  issueTokens(res, { userId, email: user.email });
+  await issueTokens(res, { userId, email: user.email });
   return res.json({ ok: true, user: publicUser(user) });
 });
 
@@ -198,7 +198,7 @@ authRouter.post("/signin", async (req, res) => {
     return res.status(401).json({ ok: false, error: "Incorrect password." });
   }
 
-  issueTokens(res, { userId: user.userId, email: user.email });
+  await issueTokens(res, { userId: user.userId, email: user.email });
   return res.json({ ok: true, user: publicUser(user) });
 });
 
@@ -301,7 +301,7 @@ authRouter.post("/verify-otp", async (req, res) => {
   if (!user) {
     return res.status(401).json({ ok: false, error: "This email/phone is not registered. Please sign up first." });
   }
-  issueTokens(res, { userId: user.userId, email: user.email });
+  await issueTokens(res, { userId: user.userId, email: user.email });
   return res.json({ ok: true, identifier: id.value, user: publicUser(user) });
 });
 

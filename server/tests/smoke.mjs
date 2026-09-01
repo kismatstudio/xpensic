@@ -29,11 +29,20 @@ function fetchJson(url, options = {}, cookieJar = {}) {
   if (cookieJar.cookie) headers.cookie = cookieJar.cookie;
   return fetch(url, { ...options, headers }).then(async (response) => {
     const setCookie = response.headers.get("set-cookie");
-    const token = /(?:^|,\s*)et_token=([^;]*)/.exec(setCookie || "");
-    if (token) {
-      if (token[1]) cookieJar.cookie = `et_token=${token[1]}`;
-      else delete cookieJar.cookie;
+    const cookies = new Map(
+      (cookieJar.cookie || "").split(/;\s*/).filter(Boolean).map((part) => {
+        const [name, ...value] = part.split("=");
+        return [name, value.join("=")];
+      }),
+    );
+    for (const name of ["et_token", "et_refresh"]) {
+      const token = new RegExp(`(?:^|,\\s*)${name}=([^;]*)`).exec(setCookie || "");
+      if (token) {
+        if (token[1]) cookies.set(name, token[1]);
+        else cookies.delete(name);
+      }
     }
+    cookieJar.cookie = [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
     let body = null;
     try { body = await response.json(); } catch { /* non-JSON 404 is expected */ }
     return { status: response.status, body };
@@ -96,6 +105,10 @@ async function main() {
       const response = await fetchJson(`${base}/api/auth/whoami`, {}, jar);
       check("whoami succeeds", response.status === 200 && response.body?.user?.email === email);
       check("whoami has no private profile", !Object.hasOwn(response.body?.user || {}, "displayName"));
+    }
+    {
+      const response = await fetchJson(`${base}/api/auth/refresh`, { method: "POST" }, jar);
+      check("refresh succeeds", response.status === 200 && response.body?.ok === true);
     }
 
     console.log("\n[2] Legacy plaintext routes are unavailable");
@@ -190,6 +203,7 @@ async function main() {
     check("plaintext financial tables are absent", !tables.some((name) => /expense|categor|budget|split/i.test(name)));
     const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table'").all().map((row) => row.sql || "").join(" ");
     check("users table has no private profile columns", !/displayName|avatarDataUrl|loginDays/.test(schema));
+    check("refresh-token row persisted", db.prepare("SELECT COUNT(*) AS count FROM refresh_tokens").get().count > 0);
     db.close();
   } finally {
     child.kill();
