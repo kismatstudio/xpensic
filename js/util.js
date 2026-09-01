@@ -1442,6 +1442,9 @@ export const UPI_APPS = [
   { value: "phonepe",   label: "PhonePe" },
   { value: "googlepay", label: "Google Pay" },
   { value: "paytm",     label: "Paytm" },
+  { value: "supermoney", label: "super.money" },
+  { value: "bhim",      label: "BHIM" },
+  { value: "cred",      label: "CRED" },
 ];
 
 /** Resolve a payment method value to its display label, with a safe fallback. */

@@ -113,7 +113,7 @@ trusted device wrap.
 - `paymentMethod` is one of: `cash`, `upi`, `debit_card`, `credit_card`,
   `bank_transfer`.
 - `upiApp` is required only when `paymentMethod === "upi"`. It can be
-  `phonepe`, `googlepay`, or `paytm`.
+  `phonepe`, `googlepay`, `paytm`, `supermoney`, `bhim`, or `cred`.
 
 ---
 

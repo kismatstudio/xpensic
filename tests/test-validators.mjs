@@ -115,6 +115,9 @@ check("non-upi ignores value",      validateUpiApp("phonepe", "cash").value === 
 check("upi + 'phonepe'",            validateUpiApp("phonepe", "upi").value === "phonepe");
 check("upi + 'googlepay'",          validateUpiApp("googlepay", "upi").value === "googlepay");
 check("upi + 'paytm'",              validateUpiApp("paytm", "upi").value === "paytm");
+check("upi + 'supermoney'",         validateUpiApp("supermoney", "upi").value === "supermoney");
+check("upi + 'bhim'",               validateUpiApp("bhim", "upi").value === "bhim");
+check("upi + 'cred'",               validateUpiApp("cred", "upi").value === "cred");
 check("upi + empty rejected",       validateUpiApp("", "upi").ok === false);
 check("upi + unknown rejected",     validateUpiApp("venmo", "upi").ok === false);
 check("upi + empty error mentions 'choose'", /choose/i.test(validateUpiApp("", "upi").error || ""));

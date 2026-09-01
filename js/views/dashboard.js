@@ -26,7 +26,7 @@ import { toast } from "../components/toast.js";
 import { buildProgressBar } from "../components/progress.js";
 import { renderBarChart } from "../components/chart.js";
 import { confirmDialog } from "../components/confirm.js";
-import { parseQuickAdd, escapeHtml, paymentMethodLabel, upiAppLabel, suggestCategory, todayISO, currentTimeHHMM, monthKey, formatMonth } from "../util.js";
+import { parseQuickAdd, escapeHtml, paymentMethodLabel, upiAppLabel, suggestCategory, todayISO, currentTimeHHMM, monthKey, formatMonth, UPI_APPS } from "../util.js";
 
 // `syncToServer` is exposed on window by main.js so views can kick the
 // server-side mirror immediately after a mutation. We grab it lazily
@@ -154,9 +154,7 @@ export function renderDashboard(container, ctx) {
               id="quick-add-upi"
               aria-label="UPI app"
               title="UPI app">
-              <option value="phonepe">PhonePe</option>
-              <option value="googlepay">Google Pay</option>
-              <option value="paytm">Paytm</option>
+              ${UPI_APPS.map((app) => `<option value="${app.value}">${app.label}</option>`).join("")}
             </select>
           </label>
           <label class="quick-add__field quick-add__field--note">

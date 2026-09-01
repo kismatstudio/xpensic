@@ -145,6 +145,15 @@ console.log("\n[5] parseVoiceCommand extracts structured fields");
   const r2 = parseVoiceCommand("lunch 320 via phonepe", cats);
   check(`"lunch 320 via phonepe" -> upi/phonepe`,
     r2.paymentMethod === "upi" && r2.upiApp === "phonepe" && r2.amount === 320);
+  const r2b = parseVoiceCommand("coffee 100 via super.money", cats);
+  check(`"coffee 100 via super.money" -> upi/supermoney`,
+    r2b.paymentMethod === "upi" && r2b.upiApp === "supermoney" && r2b.amount === 100);
+  const r2c = parseVoiceCommand("snacks 80 via BHIM", cats);
+  check(`"snacks 80 via BHIM" -> upi/bhim`,
+    r2c.paymentMethod === "upi" && r2c.upiApp === "bhim" && r2c.amount === 80);
+  const r2d = parseVoiceCommand("coffee 120 via CRED", cats);
+  check(`"coffee 120 via CRED" -> upi/cred`,
+    r2d.paymentMethod === "upi" && r2d.upiApp === "cred" && r2d.amount === 120);
   const r3 = parseVoiceCommand("petrol 1500 on credit card", cats);
   check(`"petrol 1500 on credit card" -> credit_card`,
     r3.paymentMethod === "credit_card" && r3.amount === 1500);

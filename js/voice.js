@@ -42,7 +42,7 @@ export function isSupported() {
  *     amount: number|null,
  *     note: string,
  *     paymentMethod: string,   // "cash" | "upi" | "debit_card" | "credit_card" | "bank_transfer"
- *     upiApp: string,          // "phonepe" | "googlepay" | "paytm" | ""
+ *     upiApp: string,          // known UPI app code or ""
  *     categoryId: string,      // "" if no match
  *     transcript: string,
  *   }) => void,
@@ -187,6 +187,9 @@ const PAYMENT_PHRASES = [
   { match: /\b(phonepe|phone\s*pe|phone\s*pay)\b/i,                                       upi: "phonepe",    payment: "upi" },
   { match: /\b(google\s*pay|gpay|g\s*pay)\b/i,                                            upi: "googlepay",  payment: "upi" },
   { match: /\b(paytm)\b/i,                                                     upi: "paytm",      payment: "upi" },
+  { match: /\bsuper[.\s-]*money\b/i,                                           upi: "supermoney", payment: "upi" },
+  { match: /\b(bhim)\b/i,                                                      upi: "bhim",      payment: "upi" },
+  { match: /\b(cred)\b/i,                                                      upi: "cred",      payment: "upi" },
   { match: /\b(upi)\b/i,                                                       payment: "upi" },
   { match: /\b(card)\b/i,                                                     payment: "debit_card" }, // generic "card" → debit (most common)
   { match: /\b(cash|by\s+cash|in\s+cash|using\s+cash)\b/i,                    payment: "cash" },
