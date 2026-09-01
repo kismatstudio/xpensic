@@ -1,6 +1,5 @@
-// Single source of truth for app data. Everything reads/writes through here.
-// Versioned schema; on version mismatch we surface an error rather than silently
-// dropping data — the user is in control.
+// In-memory source of truth for app data. Encrypted vault persistence is
+// handled by js/crypto/vault-sync.mjs; this module never stores user state.
 
 import { newId } from "./ids.js";
 
@@ -46,24 +45,12 @@ function freshState() {
   return {
     version: SCHEMA_VERSION,
     settings: { ...DEFAULT_SETTINGS },
-    // Profile is filled in by the sign-in / sign-up flow. Until then
-    // `phone` and `userId` are empty and the app shows the auth gate.
-    // The top-level `profiles` registry lists every account that has
-    // ever been created on this device so the "Sign in" tab can match
-    // a phone to its userId and profile.
     profile: { userId: "", name: "", phone: "", avatarDataUrl: "" },
     profiles: {},
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     budgets: { monthly: {} },
     expenses: [],
-    // Splits (Feature 5). Treated as their own log alongside expenses so
-    // the history view can render them independently.
     splits: [],
-    // Login streak — list of YYYY-MM-DD strings for every day the user
-    // successfully signed in. The dashboard's "tracking streak" badge
-    // counts consecutive days back from today using this list, so the
-    // streak reflects engagement (opening the app) rather than expense
-    // logging. Old states backfill to [] on load.
     loginDays: [],
   };
 }
@@ -80,22 +67,11 @@ export function validate(state) {
   if (!isPlainObject(state.settings)) return "Settings section is missing.";
   if (!Array.isArray(state.categories)) return "Categories section is missing.";
   if (!Array.isArray(state.expenses)) return "Expenses section is missing.";
-  // `profile` and `profiles` are optional in storage (only v3+ have them)
-  // so we don't fail here — load() backfills them after validation runs.
   return null;
 }
 
-/**
- * Upgrade an older state object to the current schema in-place. We do this
- * before validation so older users don't see a hard error — they get the
- * new fields and the app prompts them to fill in / sign back in.
- */
 export function migrate(state) {
-  if (!isPlainObject(state)) return state;
-  if (state.version === SCHEMA_VERSION) return state;
-  // Walk the upgrade chain one step at a time. Each `if` may set
-  // `state.version` to the next step's number so the loop falls through
-  // into the next migration when several versions are behind.
+  if (!isPlainObject(state) || state.version === SCHEMA_VERSION) return state;
   if (state.version === 1) {
     state.profile = { userId: "", name: "", phone: "", avatarDataUrl: "" };
     state.profiles = {};
@@ -108,22 +84,11 @@ export function migrate(state) {
     if (!isPlainObject(state.profiles)) state.profiles = {};
     state.version = 3;
   }
-  // v3 -> v4: store per-user data inside the `profiles` registry so each
-  // account gets its own expenses, budgets, and (per-user) categories.
-  // The first registry entry — if any — gets adopted with whatever top-
-  // level data is currently in storage, so existing users don't lose
-  // their history. Once the migration runs, the top-level expenses /
-  // budgets / categories fields are kept in sync with the active profile
-  // (sign-in / sign-out / sign-up handlers update both views together).
   if (state.version === 3) {
     if (!isPlainObject(state.profiles)) state.profiles = {};
-    // Pick the most-recently-registered entry as the "owner" of the
-    // existing top-level data, so we can keep the user's history.
     const ownerId = Object.keys(state.profiles)[0];
     if (ownerId && isPlainObject(state.profiles[ownerId])) {
-      state.profiles[ownerId].expenses = Array.isArray(state.expenses)
-        ? state.expenses
-        : [];
+      state.profiles[ownerId].expenses = Array.isArray(state.expenses) ? state.expenses : [];
       state.profiles[ownerId].budgets = isPlainObject(state.budgets)
         ? state.budgets
         : { monthly: {} };
@@ -133,107 +98,57 @@ export function migrate(state) {
     }
     state.version = 4;
   }
-  // v4 -> v5: add `icon` (emoji) field to every category. Defaults get
-  // the engaging emoji defined in DEFAULT_CATEGORIES; any user-added
-  // custom categories get an empty string (the UI hides the icon slot
-  // when icon is empty, so nothing breaks visually).
   if (state.version === 4) {
-    const iconById = Object.fromEntries(
-      DEFAULT_CATEGORIES.map((c) => [c.id, c.icon || ""])
-    );
-    const iconByName = Object.fromEntries(
-      DEFAULT_CATEGORIES.map((c) => [c.name.toLowerCase(), c.icon || ""])
-    );
-    const cats = Array.isArray(state.categories) ? state.categories : [];
-    for (const c of cats) {
-      if (typeof c.icon !== "string") {
-        c.icon =
-          (c.id && iconById[c.id]) ||
-          (c.name && iconByName[String(c.name).toLowerCase()]) ||
-          "";
+    const iconById = Object.fromEntries(DEFAULT_CATEGORIES.map((c) => [c.id, c.icon || ""]));
+    const iconByName = Object.fromEntries(DEFAULT_CATEGORIES.map((c) => [c.name.toLowerCase(), c.icon || ""]));
+    const applyIcons = (categories) => {
+      for (const category of categories || []) {
+        if (typeof category.icon !== "string") {
+          category.icon = iconById[category.id] || iconByName[String(category.name || "").toLowerCase()] || "";
+        }
       }
-    }
-    // Same for any per-user stashed categories in the registry.
+    };
+    applyIcons(state.categories);
     if (isPlainObject(state.profiles)) {
       for (const entry of Object.values(state.profiles)) {
-        if (!isPlainObject(entry) || !Array.isArray(entry.categories)) continue;
-        for (const c of entry.categories) {
-          if (typeof c.icon !== "string") {
-            c.icon =
-              (c.id && iconById[c.id]) ||
-              (c.name && iconByName[String(c.name).toLowerCase()]) ||
-              "";
-          }
-        }
+        if (isPlainObject(entry)) applyIcons(entry.categories);
       }
     }
     state.version = 5;
   }
-  // v5 -> v6: expand the default category list. Existing categories keep
-  // their id so historical expense rows still resolve; new defaults are
-  // merged in. Renames (Food -> Food & Dining, Transport -> Fuel &
-  // Transportation, Health -> Healthcare) only apply when the user hasn't
-  // already customised the name — i.e. the stored name still matches the
-  // previous default. That keeps the upgrade non-destructive for users
-  // who have already renamed things in the UI.
   if (state.version === 5) {
     const renames = {
-      cat_food:        "Food & Dining",
-      cat_transport:   "Fuel & Transportation",
-      cat_health:      "Healthcare",
+      cat_food: "Food & Dining",
+      cat_transport: "Fuel & Transportation",
+      cat_health: "Healthcare",
     };
-    const cats = Array.isArray(state.categories) ? state.categories : [];
-    const presentIds = new Set(cats.map((c) => c.id));
-    // 1) Rename defaults the user hasn't touched.
-    for (const c of cats) {
-      if (!c.isDefault) continue;
-      if (renames[c.id] && (c.name === c.id || c.name === c.id.replace(/^cat_/, ""))) {
-        // Match against either the bare id (e.g. "cat_food") or a
-        // de-id'd version ("food") to catch both naming conventions.
-        const bare = c.id.replace(/^cat_/, "");
-        if (c.name.toLowerCase() === bare) c.name = renames[c.id];
+    const mergeDefaults = (categories) => {
+      const list = Array.isArray(categories) ? categories : [];
+      const present = new Set(list.map((category) => category.id));
+      for (const category of list) {
+        const bare = String(category.id || "").replace(/^cat_/, "");
+        if (category.isDefault && renames[category.id] && String(category.name || "").toLowerCase() === bare) {
+          category.name = renames[category.id];
+        }
       }
-    }
-    // 2) Merge in any new defaults that aren't already present.
-    for (const def of DEFAULT_CATEGORIES) {
-      if (presentIds.has(def.id)) continue;
-      cats.push({ ...def });
-    }
-    // 3) Keep the array sorted by the canonical default order (so the
-    // picker shows categories in a consistent order), but preserve any
-    // user-added categories after the defaults.
-    const order = DEFAULT_CATEGORIES.map((c) => c.id);
-    const sortKey = (c) => {
-      const i = order.indexOf(c.id);
-      return i === -1 ? 1000 + cats.indexOf(c) : i;
+      for (const category of DEFAULT_CATEGORIES) {
+        if (!present.has(category.id)) list.push({ ...category });
+      }
+      const order = DEFAULT_CATEGORIES.map((category) => category.id);
+      list.sort((a, b) => {
+        const ia = order.indexOf(a.id);
+        const ib = order.indexOf(b.id);
+        if (ia === -1 && ib === -1) return 0;
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+      return list;
     };
-    cats.sort((a, b) => sortKey(a) - sortKey(b));
-    state.categories = cats;
-    // 4) Same merge for any per-user stashed categories in the registry.
+    state.categories = mergeDefaults(state.categories);
     if (isPlainObject(state.profiles)) {
       for (const entry of Object.values(state.profiles)) {
-        if (!isPlainObject(entry) || !Array.isArray(entry.categories)) continue;
-        const uCats = entry.categories;
-        const uPresent = new Set(uCats.map((c) => c.id));
-        for (const c of uCats) {
-          if (!c.isDefault) continue;
-          if (renames[c.id] && (c.name === c.id || c.name === c.id.replace(/^cat_/, ""))) {
-            const bare = c.id.replace(/^cat_/, "");
-            if (c.name.toLowerCase() === bare) c.name = renames[c.id];
-          }
-        }
-        for (const def of DEFAULT_CATEGORIES) {
-          if (uPresent.has(def.id)) continue;
-          uCats.push({ ...def });
-        }
-        uCats.sort((a, b) => {
-          const ia = order.indexOf(a.id);
-          const ib = order.indexOf(b.id);
-          if (ia === -1 && ib === -1) return uCats.indexOf(a) - uCats.indexOf(b);
-          if (ia === -1) return 1;
-          if (ib === -1) return -1;
-          return ia - ib;
-        });
+        if (isPlainObject(entry)) entry.categories = mergeDefaults(entry.categories);
       }
     }
     state.version = 6;
@@ -270,76 +185,11 @@ export const Store = {
   normalizeExpense,
 
   load() {
-    let raw;
-    try {
-      raw = localStorage.getItem(STORAGE_KEY);
-    } catch (e) {
-      return { ok: false, state: freshState(), error: `localStorage unavailable: ${e?.message || e}` };
-    }
-
-    if (!raw) {
-      const seeded = freshState();
-      Store._write(seeded);
-      return { ok: true, state: seeded, seeded: true };
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      // Don't delete — surface a clear error so the user can recover.
-      return { ok: false, state: freshState(), error: "Stored data is corrupted JSON." };
-    }
-
-    // Upgrade older schemas in-place before validating. This way a v1
-    // user upgrading to v2 doesn't see a hard error — they get the new
-    // `profile` field and the login gate asks them to fill it in.
-    migrate(parsed);
-
-    const err = validate(parsed);
-    if (err) return { ok: false, state: freshState(), error: err };
-
-    // Forward-migrate any old expense records to the latest shape.
-    // `normalizeExpense` only adds defaults; it never deletes data.
-    parsed.expenses.forEach(Store.normalizeExpense);
-
-    // Backfill the profile field for users upgrading from v1/v2. Keep the
-    // existing settings/categories/expenses/budgets untouched; the user
-    // will be prompted to set up their profile on next visit (phone is empty).
-    if (!isPlainObject(parsed.profile)) {
-      parsed.profile = { userId: "", name: "", phone: "", avatarDataUrl: "" };
-    } else {
-      if (typeof parsed.profile.userId !== "string") parsed.profile.userId = "";
-      if (typeof parsed.profile.name !== "string") parsed.profile.name = "";
-      if (typeof parsed.profile.phone !== "string") parsed.profile.phone = "";
-      if (typeof parsed.profile.avatarDataUrl !== "string") parsed.profile.avatarDataUrl = "";
-    }
-    // Profiles registry (v3+). Always a plain object keyed by userId.
-    if (!isPlainObject(parsed.profiles)) {
-      parsed.profiles = {};
-    } else {
-      // Drop any non-object entries to keep the registry clean.
-      for (const k of Object.keys(parsed.profiles)) {
-        if (!isPlainObject(parsed.profiles[k])) delete parsed.profiles[k];
-      }
-    }
-
-    // Login-days list (added later). Backfill to an empty array for users
-    // upgrading from older schemas; the next login will seed today.
-    if (!Array.isArray(parsed.loginDays)) {
-      parsed.loginDays = [];
-    } else {
-      // Keep only valid YYYY-MM-DD strings so the streak math is safe.
-      parsed.loginDays = parsed.loginDays.filter(
-        (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d),
-      );
-    }
-
-    return { ok: true, state: parsed, seeded: false };
+    return { ok: true, state: freshState(), seeded: true };
   },
 
   save(state) {
-    const result = Store._write(state);
+    const result = { ok: true };
     // Notify any registered listener (e.g. main.js wires this to
     // syncToServer) so every view's mutation reaches the server
     // without each call site having to remember to push manually.
@@ -364,17 +214,15 @@ export const Store = {
   _listeners: new Set(),
 
   reset() {
-    const s = freshState();
-    Store._write(s);
-    return s;
+    return freshState();
   },
 
-  _write(state) {
+  clearPlaintextCache() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e?.message || String(e) };
+      localStorage.removeItem(STORAGE_KEY);
+      return true;
+    } catch {
+      return false;
     }
   },
 

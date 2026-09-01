@@ -26,54 +26,9 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL,
   phone TEXT DEFAULT '',
   passwordHash TEXT NOT NULL,
-  displayName TEXT DEFAULT '',
-  avatarDataUrl TEXT DEFAULT '',
-  loginDays TEXT DEFAULT '[]',
   createdAt TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE TABLE IF NOT EXISTS expenses (
-  id TEXT PRIMARY KEY,
-  userId TEXT NOT NULL,
-  amount REAL DEFAULT 0,
-  date TEXT DEFAULT '',
-  categoryId TEXT DEFAULT '',
-  note TEXT DEFAULT '',
-  time TEXT DEFAULT '',
-  paymentMethod TEXT DEFAULT '',
-  upiApp TEXT DEFAULT '',
-  createdAt TEXT DEFAULT '',
-  updatedAt TEXT DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(userId);
-CREATE TABLE IF NOT EXISTS categories (
-  id TEXT PRIMARY KEY,
-  userId TEXT NOT NULL,
-  name TEXT DEFAULT '',
-  color TEXT DEFAULT '',
-  icon TEXT DEFAULT '',
-  isDefault INTEGER DEFAULT 0,
-  sortOrder REAL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_categories_user ON categories(userId);
-CREATE TABLE IF NOT EXISTS budgets (
-  userId TEXT NOT NULL,
-  monthKey TEXT NOT NULL,
-  categoryId TEXT NOT NULL,
-  amount REAL DEFAULT 0,
-  PRIMARY KEY (userId, monthKey, categoryId)
-);
-CREATE TABLE IF NOT EXISTS splits (
-  userId TEXT NOT NULL,
-  id TEXT NOT NULL,
-  splitJson TEXT DEFAULT '{}',
-  createdAt TEXT DEFAULT '',
-  PRIMARY KEY (userId, id)
-);
-CREATE TABLE IF NOT EXISTS blobs (
-  userId TEXT PRIMARY KEY,
-  blobJson TEXT DEFAULT 'null'
-);
 CREATE TABLE IF NOT EXISTS crypto_wraps (
   wrapId TEXT PRIMARY KEY,
   userId TEXT NOT NULL,
@@ -85,6 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_wraps_user ON crypto_wraps(userId);
 CREATE TABLE IF NOT EXISTS vault_blobs (
   userId TEXT PRIMARY KEY,
   envelope TEXT DEFAULT '',
+  revision INTEGER NOT NULL DEFAULT 0,
   updatedAt TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS refresh_tokens (

@@ -3,7 +3,12 @@ node_modules/
 *.db-journal
 *.db-shm
 *.db-wal
+*.log
+*.pid
+*.sqlite
+*.sqlite3
 expense-tracker.test.db
+.wrangler/
 
 # CSV storage (auto-created at runtime; never commit user data)
 data/

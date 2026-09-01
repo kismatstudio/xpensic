@@ -22,7 +22,6 @@ import {
 } from "../d1.js";
 import {
   validateIdentifier,
-  validateName,
   validatePassword,
 } from "../validate.js";
 import { attachUser } from "../middleware/auth.js";
@@ -136,21 +135,13 @@ function publicUser(row) {
     userId: row.userId,
     email: row.email,
     phone: row.phone || "",
-    displayName: row.displayName || "",
-    avatarDataUrl: row.avatarDataUrl || "",
-    // loginDays — the streak counter. Returned in /api/auth/whoami and
-    // PATCH /api/auth/profile responses so the client can pick it up
-    // after sign-in and keep the dashboard's hero-card badge in sync.
-    // Kept out of the typical user listing payloads — only the
-    // "self" surfaces return it.
-    loginDays: Array.isArray(row.loginDays) ? row.loginDays : [],
   };
 }
 
 // POST /api/auth/signup
 // Body: { identifier (email or phone), password, confirmPassword, displayName? }
 authRouter.post("/signup", async (req, res) => {
-  const { identifier, password, confirmPassword, displayName } = req.body || {};
+  const { identifier, password, confirmPassword } = req.body || {};
   const id = validateIdentifier(identifier);
   if (!id) {
     return res.status(400).json({ ok: false, error: "Enter a valid email or 10-digit mobile number." });
@@ -162,8 +153,6 @@ authRouter.post("/signup", async (req, res) => {
   if (password !== confirmPassword) {
     return res.status(400).json({ ok: false, error: "Passwords do not match." });
   }
-  const name = displayName ? validateName(displayName) : "";
-
   // Phone-only accounts get a synthetic `phone:<digits>` email key so
   // they share the lookup path with real emails.
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
@@ -178,8 +167,6 @@ authRouter.post("/signup", async (req, res) => {
     email: emailKey,
     phone: id.kind === "phone" ? id.value : "",
     passwordHash,
-    displayName: name || "",
-    avatarDataUrl: "",
     createdAt: new Date().toISOString(),
   });
 
@@ -337,55 +324,6 @@ authRouter.post("/signout", async (req, res) => {
   res.clearCookie(COOKIE_NAME, { path: "/" });
   res.clearCookie(REFRESH_COOKIE_NAME, { path: "/" });
   return res.json({ ok: true });
-});
-
-// PATCH /api/auth/profile — update display name / phone / avatar.
-// Body: { displayName? | name?, phone?, avatarDataUrl?, loginDays? }
-// Accepts both `displayName` (server-canonical) and `name` (the field
-// name the client uses on its in-memory profile) so the existing
-// Profile view doesn't have to know the server's naming convention.
-authRouter.patch("/profile", attachUser, async (req, res) => {
-  if (!req.user) {
-    return res.status(401).json({ ok: false, error: "Not authenticated." });
-  }
-  const { displayName, name, phone, avatarDataUrl, loginDays } = req.body || {};
-  const patch = {};
-  // Prefer displayName when both are sent; otherwise fall back to name.
-  const nameCandidate = typeof displayName === "string" ? displayName : name;
-  if (typeof nameCandidate === "string") {
-    const cleaned = validateName(nameCandidate);
-    if (!cleaned) return res.status(400).json({ ok: false, error: "Invalid display name." });
-    patch.displayName = cleaned;
-  }
-  if (typeof phone === "string") {
-    // Same normalisation the signup path uses — strip non-digits, keep
-    // the last 10. Empty string is allowed (clears the phone).
-    const digits = phone.replace(/\D/g, "").slice(-10);
-    if (phone.trim() !== "" && digits.length !== 10) {
-      return res.status(400).json({ ok: false, error: "Phone must be a 10-digit Indian mobile number." });
-    }
-    patch.phone = digits;
-  }
-  if (typeof avatarDataUrl === "string") {
-    patch.avatarDataUrl = avatarDataUrl.slice(0, 200_000); // ~200KB cap
-  }
-  // loginDays — the streak counter. Stored on the user record so the
-  // client can hydrate it via /api/data on next sign-in and the
-  // streak survives a fresh device. We validate strictly so a
-  // malicious client can't pollute the column with junk.
-  if (Array.isArray(loginDays)) {
-    const cleaned = loginDays
-      .filter((d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .slice(-365) // cap to a year of history to keep the row small
-      .sort();
-    if (cleaned.length > 0) patch.loginDays = cleaned;
-  }
-  if (Object.keys(patch).length === 0) {
-    return res.status(400).json({ ok: false, error: "Nothing to update." });
-  }
-  const user = await updateUser(req.user.userId, patch);
-  if (!user) return res.status(404).json({ ok: false, error: "User not found." });
-  return res.json({ ok: true, user: publicUser(user) });
 });
 
 // --- helpers --------------------------------------------------------------

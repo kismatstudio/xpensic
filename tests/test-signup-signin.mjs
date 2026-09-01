@@ -41,10 +41,10 @@ check("freshState adds userId to profile",
 check("freshState adds profiles registry", /profiles:\s*\{\s*\}/.test(storeSrc));
 check("migrate walks v1 then v2",
   /state\.version\s*===\s*1/.test(storeSrc) && /state\.version\s*===\s*2/.test(storeSrc));
-check("load backfills userId for old profiles",
-  /typeof parsed\.profile\.userId\s*!==\s*"string"/.test(storeSrc));
-check("load backfills profiles registry",
-  /!isPlainObject\(parsed\.profiles\)/.test(storeSrc));
+check("load starts with fresh in-memory state",
+  /load\(\)\s*\{\s*return\s*\{\s*ok:\s*true,\s*state:\s*freshState\(\)/s.test(storeSrc));
+check("plaintext cache cleanup is available",
+  /clearPlaintextCache\(\)/.test(storeSrc));
 
 console.log("\n[2] Store.migrate: live migration v1 → v2 → v3 → v4 → v5 → v6");
 const { Store, migrate } = await import("../js/store.js");
@@ -92,7 +92,7 @@ check("v3 → default categories picked up an emoji icon after v4→v5 migration
 
 // ---- Section 3: api.js surface ------------------------------------------
 
-console.log("\n[3] js/api.js exports the Auth + Data clients");
+console.log("\n[3] js/api.js exports the Auth + Crypto clients");
 check("api.js exports Auth.signup",  /signup:\s*\(body\)/.test(apiSrc));
 check("api.js exports Auth.signin",  /signin:\s*\(body\)/.test(apiSrc));
 check("api.js exports Auth.signout", /signout:\s*\(/.test(apiSrc));
@@ -101,11 +101,9 @@ check("api.js exports Auth.sendOtp", /sendOtp:\s*\(/.test(apiSrc));
 check("api.js exports Auth.verifyOtp", /verifyOtp:\s*\(/.test(apiSrc));
 check("api.js sends credentials: include", /credentials:\s*"include"/.test(apiSrc));
 check("api.js throws ApiError on failure", /class ApiError/.test(apiSrc));
-check("api.js exports Data.get",  /get:\s*\(\)/.test(apiSrc));
-check("api.js exports Expenses CRUD", /Expenses\s*=/.test(apiSrc) && /create:\s*\(expense\)/.test(apiSrc));
-check("api.js exports Categories CRUD", /Categories\s*=/.test(apiSrc) && /create:\s*\(category\)/.test(apiSrc));
-check("api.js exports Budgets get+put", /Budgets\s*=/.test(apiSrc) && /put:\s*\(budgets\)/.test(apiSrc));
-check("api.js exports Settings get+put", /Settings\s*=/.test(apiSrc) && /put:\s*\(patch\)/.test(apiSrc));
+check("api.js exports Crypto.getVault", /getVault:\s*\(\)/.test(apiSrc));
+check("api.js exports Crypto.putVault", /putVault:\s*\(blob,\s*revision/.test(apiSrc));
+check("api.js exports Crypto.deleteVault", /deleteVault:/.test(apiSrc));
 
 // ---- Section 4: login.js uses the Auth client ----------------------------
 
@@ -175,8 +173,8 @@ check("login surfaces signin errors",
 // ---- Section 8: main.js — boot + signOut ---------------------------------
 
 console.log("\n[8] main.js: boot + signOut");
-check("main.js imports Auth + Data from api.js",
-  /from\s+"\.\/api\.js"/.test(main));
+check("main.js imports Auth + Crypto from api.js",
+  /Auth,\s+Crypto/.test(main));
 check("main.js calls Auth.whoami on boot",
   /Auth\.whoami\(\)/.test(main));
 check("main.js calls Crypto.getVault to hydrate after unlock",

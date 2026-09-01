@@ -530,7 +530,7 @@ export function mountLogin({ onComplete }) {
 
   function onSignedIn(user, { justSignedUp = false, vaultPassword = "" } = {}) {
     // Build a stable avatar data URL for the local cache so the
-    // profile screen has something to show before /api/data loads.
+    // profile screen has something to show before the encrypted vault loads.
     // Fresh sign-ups have no display name yet (the user can set one
     // later in Profile); fall back to the first letter of the email
     // (or the first digit of the phone) so the initials avatar still

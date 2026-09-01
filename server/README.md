@@ -1,14 +1,14 @@
 # XPENSIC — Server
 
-Tiny auth + per-user data backend. Pairs with the static client in
-the parent directory (`../`).
+Tiny authentication and encrypted-vault relay. Pairs with the static
+client in the parent directory (`../`).
 
 > **Stack:** Node + Express + D1 (Cloudflare) / SQLite (local) + bcryptjs + JWT
 > **Storage:** Cloudflare D1 on Workers; a local SQLite adapter (`node:sqlite`)
 > for development. The storage layer is isolated to `src/d1.js` +
 > `src/crypto-d1.js`.
-> **Goal:** A no-fuss backend so the client can do real account-based
-> auth, multi-device sign-in, and per-user data persistence.
+> **Goal:** Authenticate accounts and persist opaque encrypted vault
+> envelopes without receiving decrypted user data.
 
 ---
 
@@ -19,7 +19,7 @@ cd server
 npm install                # one-time
 npm start                  # starts on PORT (default 8787)
 
-# Smoke test (boots the API on a random port, exercises every route)
+# Smoke test (boots the API and checks the E2EE boundary)
 npm run smoke
 ```
 
@@ -91,6 +91,12 @@ Copy the returned `database_id` into `wrangler.toml` (the binding is
 npx wrangler d1 execute xpensic-staging-db --remote --file=./schemas/schema.sql
 ```
 
+`schema.sql` is for a new database and is non-destructive. For an existing
+database, apply only the numbered migrations after reviewing their effect.
+`001-add-vault-revision.sql` is additive. `002-remove-legacy-plaintext-tables.sql`
+permanently deletes retired plaintext tables and must not be run until any
+existing data has been reviewed and backed up as authorized.
+
 ### 3. Set secrets
 
 ```bash
@@ -126,7 +132,7 @@ on every fetch so it never sees the token.
 | Method | Path                              | Body / Notes                                     |
 |--------|-----------------------------------|--------------------------------------------------|
 | GET    | `/api/health`                     | `{ ok, ts }`                                     |
-| POST   | `/api/auth/signup`                | `{ identifier, password, confirmPassword, displayName? }` |
+| POST   | `/api/auth/signup`                | `{ identifier, password, confirmPassword }` |
 | POST   | `/api/auth/signin`                | `{ identifier, password }`                       |
 | POST   | `/api/auth/send-otp`              | `{ identifier }` — delivers a 4-digit code via Resend (or demo mode if `RESEND_API_KEY` is unset) |
 | POST   | `/api/auth/verify-otp`            | `{ identifier, code }`                           |
@@ -134,11 +140,12 @@ on every fetch so it never sees the token.
 | POST   | `/api/auth/forgot/verify`         | `{ identifier, code }` → returns `{ resetToken }` (short-lived JWT, 10-min TTL) |
 | POST   | `/api/auth/forgot/reset`          | `{ identifier, code, resetToken, newPassword }`  |
 | GET    | `/api/auth/whoami`                | Returns `{ user }` or 401                        |
-| PATCH  | `/api/auth/profile`               | `{ displayName?, avatarDataUrl? }`               |
 | POST   | `/api/auth/signout`               | Clears the cookie                                |
-| GET    | `/api/data`                       | Returns the user's full data blob                |
-| PUT    | `/api/data`                       | Replaces the user's full data blob               |
-| DELETE | `/api/data`                       | Erases the user's data blob                      |
+| GET    | `/api/crypto/master-key`          | Returns opaque master-key wraps                 |
+| PUT    | `/api/crypto/master-key`          | Replaces opaque master-key wraps                |
+| GET    | `/api/crypto/vault`               | Returns the encrypted vault envelope            |
+| PUT    | `/api/crypto/vault`               | Stores an encrypted vault envelope              |
+| DELETE | `/api/crypto/vault`               | Deletes the encrypted vault                     |
 
 ### Identifiers
 
@@ -165,35 +172,31 @@ In all three paths the route shape and the response are the same,
 so swapping in Twilio / MSG91 for SMS delivery doesn't change the
 client. See `src/email.js` for the exact delivery logic.
 
-### Data blob shape
+### Encrypted vault contract
 
-The PUT body is the same v5 JSON blob the client uses today
-(`categories`, `budgets`, `expenses`, `settings`, `profile`).
-We don't normalize the fields; the client owns the schema. Server
-only checks the minimum structure (arrays for categories/expenses,
-object for budgets).
+The client serializes the complete state and encrypts it with a random
+32-byte master key using AES-GCM-256 before calling `/api/crypto/vault`.
+The server validates only the outer envelope (`v`, `alg`, `nonce`, and
+`ct`) and stores it as opaque JSON. It never parses the decrypted state.
+
+Master-key wraps are independently encrypted with the vault password,
+recovery phrase, or browser device key. The server stores the wraps but
+never receives the wrapping keys or the master key.
 
 ### Storage layout
 
-On disk the server uses one CSV per table inside `server/data/`:
+The local adapter and Cloudflare D1 use only these tables:
 
 ```
-server/data/
-  users.csv       one row per account         (userId, email, passwordHash, …)
-  expenses.csv    one row per expense         (denormalised: userId on every row)
-  categories.csv  one row per category        (denormalised: userId on every row)
-  budgets.csv     one row per (user, month, category) — the JSON's nested
-                    {monthly: { "2026-07": { cat_food: 400 }}} becomes three
-                    flat columns
-  blobs.csv       one row per user — the full v5 client blob, JSON-encoded,
-                    so PUT /api/data and GET /api/data round-trip unchanged
+users          account identifier and password hash only
+crypto_wraps   opaque per-user master-key wrap envelopes
+vault_blobs    opaque per-user encrypted vault envelopes
+refresh_tokens hashed authentication sessions
 ```
 
-Writes are debounced (250ms) and atomic (write to `*.tmp` then rename), so a crash mid-write can never corrupt a file.
-
-#### Migrating from the old JSON store
-
-The old `server/expense-tracker.db.json` is still supported on first boot: `db.js` detects it, fans it out into the four CSVs, and renames the JSON to `expense-tracker.db.json.migrated` so the migration only runs once. After that, the JSON is left untouched and the server reads/writes only the CSV files.
+There are no server-side expense, category, budget, split, profile, or
+full-state tables. JSON exports are created locally and are plaintext by
+design because the user explicitly requested an export.
 
 ---
 
@@ -201,33 +204,27 @@ The old `server/expense-tracker.db.json` is still supported on first boot: `db.j
 
 ```
 server/
-├── data/                   # CSV storage (auto-created on first boot)
-│   ├── users.csv
-│   ├── expenses.csv
-│   ├── categories.csv
-│   ├── budgets.csv
-│   └── blobs.csv
 ├── package.json
 ├── src/
 │   ├── server.js          # entry, Express setup
-│   ├── env.js             # tiny .env loader
-│   ├── db.js              # CSV-backed store + JSON→CSV migration
-│   ├── csv.js             # RFC 4180 parser / writer
+│   ├── worker.js          # Cloudflare Workers entry point
+│   ├── d1.js              # auth + refresh-token persistence
+│   ├── crypto-d1.js       # opaque wrap + vault persistence
 │   ├── email.js           # Resend transactional email client
 │   ├── ids.js             # ULID-style id helper
-│   ├── validate.js        # email / phone / password / name
+│   ├── validate.js        # email / phone / password validation
 │   ├── middleware/
 │   │   └── auth.js        # JWT verify, attaches req.user
 │   └── routes/
-│       ├── auth.js        # signup / signin / OTP / profile / signout
-│       └── data.js        # GET / PUT / DELETE data blob
+│       ├── auth.js        # signup / signin / OTP / reset / signout
+│       └── crypto.js      # opaque vault + master-key wrap relay
 └── tests/
-    └── smoke.mjs          # in-process end-to-end API test
+  └── smoke.mjs          # encrypted-boundary API test
 ```
 
 ---
 
 ## Tested in
 
-Node 18+ on Windows. The smoke test passes on first run with a fresh
-DB.
+Node 22.5+ is recommended for the local SQLite adapter. The smoke test
+passes on first run with a fresh DB.

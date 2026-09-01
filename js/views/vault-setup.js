@@ -8,13 +8,13 @@
 // have no way to recover their data if they ever need to sign in
 // from a new device.
 
-import { Crypto, Data } from "../api.js";
+import { Crypto } from "../api.js";
 import { newMasterKey } from "../crypto/sodium.mjs";
 import { wrapWithPassword, wrapWithPhrase } from "../crypto/keystore.mjs";
 import { generatePhrase } from "../crypto/recovery.mjs";
 import { setMasterKey } from "../crypto/unlock-gate.mjs";
-import { encryptVault } from "../crypto/vault.mjs";
-import { Store, migrate as migrateState } from "../store.js";
+import { saveVault } from "../crypto/vault-sync.mjs";
+import { Store } from "../store.js";
 import { escapeHtml } from "../util.js";
 import { toast } from "../components/toast.js";
 import { enhancePasswordInputs } from "../components/pw-toggle.js";
@@ -235,37 +235,7 @@ export async function mountVaultSetup({ onComplete, profile }) {
     // 4. Set the in-memory MK and write the initial vault so the
     //    server has something to give us on the next boot.
     setMasterKey(mk);
-    // Build the seed for the new vault. If the user already has
-    // per-table data on the server (this can happen if they signed
-    // up before E2EE was rolled out, or if they're re-keying after
-    // losing a wrap), pull that data first so the new vault doesn't
-    // start out empty. Otherwise fresh-state the seed.
-    let seed = null;
-    try {
-      const res = await Data.get();
-      const existing = (res && res.data) || {};
-      // Heuristic: if the server returns a blob with at least one
-      // expense, category, budget, or split, treat the user as having
-      // existing data. The empty default blob (just version + settings)
-      // is always safe to overwrite with a fresh seed.
-      const hasData =
-        (existing.expenses && existing.expenses.length > 0) ||
-        (existing.categories && existing.categories.length > 0) ||
-        (existing.budgets && existing.budgets.monthly && Object.keys(existing.budgets.monthly).length > 0) ||
-        (existing.splits && existing.splits.length > 0);
-      if (hasData) {
-        // Normalise the server blob to the same shape the client uses,
-        // then drop the version field so Store doesn't re-migrate it.
-        const normalised = migrateState({ ...existing, version: 6 });
-        seed = normalised;
-      }
-    } catch (e) {
-      // Server unreachable, schema change, etc. — fall back to a
-      // fresh seed. The per-resource sync after mount will pull
-      // data back if the server has it.
-      console.warn("[vault-setup] could not fetch existing data:", e?.message || e);
-    }
-    if (!seed) seed = { ...Store.reset() };
+    const seed = { ...Store.reset() };
     // Adopt the signed-in user identity.
     if (profile) {
       seed.profile = {
@@ -275,8 +245,8 @@ export async function mountVaultSetup({ onComplete, profile }) {
         avatarDataUrl: profile.avatarDataUrl || "",
       };
     }
-    try { await Crypto.putVault(await encryptVault(mk, seed)); }
-    catch (e) { toast("Could not encrypt initial vault: " + e.message, "error"); return; }
+    try { await saveVault(seed, { userId: profile?.userId || "" }); }
+    catch (e) { toast("Could not save encrypted vault: " + e.message, "error"); return; }
     // 5. Hand control back. The app will treat the seed as the
     //    initial state and the user is "unlocked" from here on.
     root.remove();

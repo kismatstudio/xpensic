@@ -58,20 +58,56 @@ export async function replaceAllWraps(userId, wraps) {
 
 export async function getVault(userId) {
   const { results } = await requireDb()
-    .prepare("SELECT envelope FROM vault_blobs WHERE userId = ? LIMIT 1")
+    .prepare("SELECT envelope, revision FROM vault_blobs WHERE userId = ? LIMIT 1")
     .bind(userId)
     .all();
   if (!results[0]) return null;
-  return safeParse(results[0].envelope);
+  return {
+    envelope: safeParse(results[0].envelope),
+    revision: Number(results[0].revision) || 0,
+  };
 }
 
-export async function setVault(userId, envelope) {
-  await requireDb()
+export async function setVault(userId, envelope, expectedRevision = 0) {
+  const d = requireDb();
+  const expected = Number.isInteger(expectedRevision) && expectedRevision >= 0
+    ? expectedRevision
+    : 0;
+  const current = await d
+    .prepare("SELECT revision FROM vault_blobs WHERE userId = ? LIMIT 1")
+    .bind(userId)
+    .all();
+  const row = current.results[0];
+  const now = new Date().toISOString();
+
+  if (!row) {
+    if (expected !== 0) return { ok: false, conflict: true, revision: 0 };
+    await d
+      .prepare("INSERT INTO vault_blobs (userId, envelope, revision, updatedAt) VALUES (?, ?, ?, ?)")
+      .bind(userId, JSON.stringify(envelope), 1, now)
+      .run();
+    return { ok: true, revision: 1 };
+  }
+
+  const currentRevision = Number(row.revision) || 0;
+  if (expected !== currentRevision) {
+    return { ok: false, conflict: true, revision: currentRevision };
+  }
+  const updated = await d
     .prepare(
-      `INSERT INTO vault_blobs (userId, envelope, updatedAt) VALUES (?, ?, ?)
-       ON CONFLICT(userId) DO UPDATE SET envelope = excluded.envelope, updatedAt = excluded.updatedAt`
+      "UPDATE vault_blobs SET envelope = ?, revision = revision + 1, updatedAt = ? WHERE userId = ? AND revision = ?"
     )
-    .bind(userId, JSON.stringify(envelope), new Date().toISOString())
+    .bind(JSON.stringify(envelope), now, userId, currentRevision)
     .run();
-  return { userId, envelope, updatedAt: new Date().toISOString() };
+  if ((updated.meta && updated.meta.changes) !== 1) {
+    return { ok: false, conflict: true, revision: currentRevision };
+  }
+  return { ok: true, revision: currentRevision + 1 };
+}
+
+export async function deleteVault(userId) {
+  await requireDb()
+    .prepare("DELETE FROM vault_blobs WHERE userId = ?")
+    .bind(userId)
+    .run();
 }

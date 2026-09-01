@@ -7,20 +7,21 @@
 //
 //   {
 //     v: 1,
-//     alg: "xchacha20-poly1305",
+//     alg: "aes-gcm-256",
 //     nonce: "<b64>",
 //     ct: "<b64>",
 //     updatedAt: "<iso>"
 //   }
 //
-// The blob also gets a SHA-256 fingerprint of the plaintext (kept
-// alongside the envelope) so the client can detect silent corruption
-// after decryption.
+// The blob also gets a keyed HMAC fingerprint so the client can detect
+// silent corruption after decryption without exposing a plaintext hash.
 
-import { aeadEncrypt, aeadDecrypt, sha256 } from "./sodium.mjs";
+import { aeadEncrypt, aeadDecrypt, authTag } from "./sodium.mjs";
 import { bytesToB64, b64ToBytes } from "./sodium.mjs";
 
 const STATE_VERSION = 1;
+const VAULT_ALGORITHM = "aes-gcm-256";
+const LEGACY_VAULT_ALGORITHMS = new Set(["xchacha20-poly1305"]);
 
 /** Serialize a state object, encrypt with MK, return JSON envelope. */
 export async function encryptVault(masterKey, state) {
@@ -31,10 +32,10 @@ export async function encryptVault(masterKey, state) {
   const json = JSON.stringify({ v: STATE_VERSION, data: state });
   const pt = enc.encode(json);
   const { nonce, ct } = await aeadEncrypt(masterKey, pt);
-  const fingerprint = await sha256(pt);
+  const fingerprint = await authTag(masterKey, pt);
   return {
     v: 1,
-    alg: "xchacha20-poly1305",
+    alg: VAULT_ALGORITHM,
     nonce,
     ct,
     fingerprint: bytesToB64(fingerprint),
@@ -46,12 +47,17 @@ export async function encryptVault(masterKey, state) {
 export async function decryptVault(masterKey, envelope) {
   if (!envelope) return null;
   if (!envelope.nonce || !envelope.ct) return null;
+  if (
+    envelope.v !== STATE_VERSION ||
+    (envelope.alg !== VAULT_ALGORITHM && !LEGACY_VAULT_ALGORITHMS.has(envelope.alg))
+  ) {
+    throw new Error("Unsupported vault envelope version or algorithm");
+  }
   const pt = await aeadDecrypt(masterKey, envelope.nonce, envelope.ct);
-  // Optional fingerprint check — a defence-in-depth against silent
-  // corruption. We don't fail on mismatch (could be a fingerprint
-  // bug), but we log it so the user/dev can investigate.
+  // Optional keyed fingerprint check — AES-GCM already authenticates
+  // the ciphertext, but this detects an incorrectly assembled envelope.
   if (envelope.fingerprint) {
-    const actual = await sha256(pt);
+    const actual = await authTag(masterKey, pt);
     if (bytesToB64(actual) !== envelope.fingerprint) {
       console.warn("[vault] fingerprint mismatch — vault may have been tampered with");
     }

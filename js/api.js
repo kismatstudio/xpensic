@@ -123,8 +123,6 @@ export const Auth = {
       method: "POST",
       body: { identifier, code },
     }),
-  updateProfile: (patch) =>
-    request("/api/auth/profile", { method: "PATCH", body: patch }),
   // Forgot password — three-step flow.
   forgotSendOtp: (identifier) =>
     request("/api/auth/forgot/send-otp", {
@@ -141,12 +139,6 @@ export const Auth = {
       method: "POST",
       body: { identifier, code, resetToken, newPassword },
     }),
-};
-
-// --- Data (GET only — hydrate on boot) ------------------------------------
-
-export const Data = {
-  get: () => request("/api/data"),
 };
 
 // --- Crypto (E2EE vault + master-key wraps) -------------------------------
@@ -196,89 +188,15 @@ export const Crypto = {
   putMasterKey: (wraps) => request("/api/crypto/master-key", { method: "PUT", body: { wraps } }),
   // Fetch the encrypted vault blob.
   getVault: () => request("/api/crypto/vault"),
-  // Upload a new encrypted vault blob.
-  putVault: (blob) => request("/api/crypto/vault", { method: "PUT", body: blob }),
-};
-
-// --- Devices (public keys only) -------------------------------------------
-
-export const Devices = {
-  list: () => request("/api/devices"),
-  register: (label, pubKeyX25519, pubKeyEd25519) =>
-    request("/api/devices", { method: "POST", body: { label, pubKeyX25519, pubKeyEd25519 } }),
-  revoke: (deviceId) => request(`/api/devices/${encodeURIComponent(deviceId)}`, { method: "DELETE" }),
-};
-
-// --- Pairing (QR device linking) ------------------------------------------
-
-export const Pair = {
-  start: (ephemeralPubKey) => request("/api/pair/start", { method: "POST", body: { ephemeralPubKey } }),
-  join: (pairingId, newDevicePubKey, newDeviceLabel) =>
-    request(`/api/pair/join/${encodeURIComponent(pairingId)}`, {
-      method: "POST",
-      body: { newDevicePubKey, newDeviceLabel },
+  // Upload a new encrypted vault blob at the revision the client read.
+  putVault: (blob, revision = 0) =>
+    request("/api/crypto/vault", {
+      method: "PUT",
+      body: { envelope: blob, revision },
     }),
-  pending: (pairingId) => request(`/api/pair/pending/${encodeURIComponent(pairingId)}`),
-  complete: (pairingId, newDevicePubKey, newDeviceLabel, wrappedMk) =>
-    request(`/api/pair/complete/${encodeURIComponent(pairingId)}`, {
-      method: "POST",
-      body: { newDevicePubKey, newDeviceLabel, wrappedMk },
-    }),
-  result: (pairingId) => request(`/api/pair/result/${encodeURIComponent(pairingId)}`),
-  // Fetch the trusted device's public Ed25519 signing key to verify the QR.
-  trustedKey: (pairingId) =>
-    request(`/api/pair/trusted-key/${encodeURIComponent(pairingId)}`),
-};
-
-// --- Encrypted blobs (receipts) -------------------------------------------
-
-export const Blobs = {
-  list: () => request("/api/blobs"),
-  // envelope = { v, alg, nonce, ct, mimeType, sizeBytes, ... }
-  upload: (envelope) => request("/api/blobs", { method: "POST", body: envelope }),
-  download: (blobId) => request(`/api/blobs/${encodeURIComponent(blobId)}`),
-  remove: (blobId) => request(`/api/blobs/${encodeURIComponent(blobId)}`, { method: "DELETE" }),
-};
-
-// --- Expenses (per-resource CRUD) -----------------------------------------
-
-export const Expenses = {
-  list:   () => request("/api/expenses"),
-  create: (expense) => request("/api/expenses", { method: "POST", body: expense }),
-  update: (id, expense) => request(`/api/expenses/${encodeURIComponent(id)}`, { method: "PUT", body: expense }),
-  remove: (id) => request(`/api/expenses/${encodeURIComponent(id)}`, { method: "DELETE" }),
-};
-
-// --- Categories (per-resource CRUD) ---------------------------------------
-
-export const Categories = {
-  list:   () => request("/api/categories"),
-  create: (category) => request("/api/categories", { method: "POST", body: category }),
-  update: (id, category) => request(`/api/categories/${encodeURIComponent(id)}`, { method: "PUT", body: category }),
-  remove: (id) => request(`/api/categories/${encodeURIComponent(id)}`, { method: "DELETE" }),
-};
-
-// --- Budgets (whole-blob replace per user) --------------------------------
-
-export const Budgets = {
-  get: () => request("/api/budgets"),
-  put: (budgets) => request("/api/budgets", { method: "PUT", body: budgets }),
-};
-
-// --- Settings (merge patch) -----------------------------------------------
-
-export const Settings = {
-  get: () => request("/api/settings"),
-  put: (patch) => request("/api/settings", { method: "PUT", body: patch }),
-};
-
-// --- Splits (per-resource CRUD) ------------------------------------------
-
-export const Splits = {
-  list:   () => request("/api/splits"),
-  create: (split) => request("/api/splits", { method: "POST", body: split }),
-  update: (id, split) => request(`/api/splits/${encodeURIComponent(id)}`, { method: "PUT", body: split }),
-  remove: (id) => request(`/api/splits/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  // Delete the encrypted vault. Master-key wraps are cleared separately by
+  // sending an empty wrap list.
+  deleteVault: () => request("/api/crypto/vault", { method: "DELETE" }),
 };
 
 // --- Health ---------------------------------------------------------------

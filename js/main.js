@@ -6,13 +6,10 @@
 //   • If the server is unreachable or the cookie is missing/invalid, we
 //     mount the login gate. The gate signs the user in and hands us a
 //     user object; we then fetch the data blob.
-//   • Every state mutation that previously called `Store.save(...)` now
-//     also pushes to the server via `syncToServer` (debounced 500ms).
-//     localStorage is still used as a write-through cache so reloads
-//     are instant and the app still works offline against the last
-//     known good blob.
+//   • Every unlocked state mutation is encrypted in the browser and
+//     uploaded as one vault envelope. The local cache is encrypted too.
 
-import { Store, migrate } from "./store.js";
+import { Store } from "./store.js";
 import { formatCurrency } from "./format.js";
 import { initTheme, cycleTheme, getThemePref, setTheme } from "./theme.js";
 import { initCursor } from "./cursor.js";
@@ -37,11 +34,20 @@ import {
   startOfMonth, monthKey, formatMonth,
   formatIndianPhone, generateAvatarDataUrl,
 } from "./util.js";
-import { Auth, Data, Crypto, apiBase, ApiError, Expenses, Categories, Budgets, Settings, Splits } from "./api.js";
+import { Auth, Crypto, apiBase, ApiError } from "./api.js";
 import { getDeviceKey, isAvailable as deviceKeyAvailable, clearDeviceKey as clearLocalDeviceKey, needsReauth, touchLastUnlockAt } from "./crypto/device-key.mjs";
 import { unwrapWithDeviceKey, wrapWithDeviceKey, newDeviceKey, getDeviceId } from "./crypto/keystore.mjs";
-import { setMasterKey, getMasterKey as readMasterKey } from "./crypto/unlock-gate.mjs";
-import { loadVault as loadEncryptedVault } from "./crypto/vault-sync.mjs";
+import {
+  setMasterKey,
+  getMasterKey as readMasterKey,
+  getState as getUnlockState,
+  lock as lockVault,
+} from "./crypto/unlock-gate.mjs";
+import {
+  loadVault as loadEncryptedVault,
+  saveVault as saveEncryptedVault,
+  clearVaultCache,
+} from "./crypto/vault-sync.mjs";
 
 // ---- Route table -----------------------------------------------------------
 
@@ -66,258 +72,46 @@ const session = {
   serverOnline: true,
 };
 
-// ---- Server sync -----------------------------------------------------------
-// Smart diff sync: instead of pushing the whole blob on every mutation,
-// we diff the current state against `lastKnownServerState` and fire
-// per-resource API calls only for what changed.
-//
-//   • Expense added/edited/deleted → POST/PUT/DELETE /api/expenses/:id
-//   • Category added/edited/deleted → POST/PUT/DELETE /api/categories/:id
-//   • Budgets changed → PUT /api/budgets (whole-blob replace)
-//   • Settings changed → PUT /api/settings (merge patch)
-//   • Profile changed → PATCH /api/auth/profile
-//   • Split added/edited/deleted   → POST/PUT/DELETE /api/splits/:id
-//
-// Every `Store.save(...)` from any view automatically fires a sync via
-// the listener registered below — callers don't need to remember to
-// call syncToServer() themselves.
+// ---- Encrypted vault sync --------------------------------------------------
+// Every Store.save() queues the complete state for client-side encryption.
+// The server receives one opaque vault envelope and never receives individual
+// expense, category, budget, split, settings, or profile records.
 let syncTimer = null;
 let syncPending = false;
-
-// The last server-confirmed state. Initialised after GET /api/data on
-// boot and updated after every successful per-resource push. We diff
-// against this to know what to send.
-let lastKnownServerState = null;
+let syncInFlight = false;
 
 function syncToServer() {
   syncPending = true;
-  if (syncTimer) return;
+  if (syncTimer || syncInFlight) return;
   syncTimer = setTimeout(() => {
     syncTimer = null;
     if (!syncPending) return;
-    syncPending = false;
-    flushSync();
+    flushVaultSync().catch(() => {});
   }, 500);
 }
 
-// Expose syncToServer on window so other views (e.g. the Splits view)
-// can force an immediate flush after a mutation instead of waiting
-// for the 500ms debounce. Also makes the function visible in dev
-// tools for debugging.
-if (typeof window !== "undefined") {
-  window.syncToServer = syncToServer;
-}
-
-// Wire Store.save → syncToServer. Registering once at boot covers every
-// view (expenses, budgets, categories, profile, splits, dashboard).
 Store.onSave(() => syncToServer());
 
-async function flushSync() {
-  if (!session.state || !session.state.profile?.userId) return;
-  if (!lastKnownServerState) {
-    // Defensive: if for any reason lastKnownServerState is still null
-    // (e.g. a race where the user mutated state in the same tick as the
-    // unlock snapshot), bootstrap it from an EMPTY baseline so this
-    // round's diffs — including any pending Quick Add entries — are
-    // pushed immediately. The old behaviour (seed from current state)
-    // silently dropped the mutation that triggered this flush, which is
-    // exactly the "Quick Add entry never recorded" symptom.
-    lastKnownServerState = {
-      expenses: [], categories: [], splits: [],
-      budgets: { monthly: {} }, settings: {},
-    };
-  }
-  const userId = session.state.profile.userId;
-  const diffs = computeDiffs(lastKnownServerState, session.state);
-  if (diffs.length === 0) return;
-  // eslint-disable-next-line no-console
-  console.log("[sync] flushing", diffs.length, "op(s):", diffs.map((o) => o.type).join(", "));
-  let allOk = true;
-  for (const op of diffs) {
-    try {
-      await executeOp(userId, op);
-    } catch (err) {
-      allOk = false;
-      // eslint-disable-next-line no-console
-      console.warn(`[sync] ${op.type} failed:`, err?.message || err, err?.status);
-    }
-  }
-  if (allOk) {
-    // Update the known state to match what we just pushed.
-    lastKnownServerState = JSON.parse(JSON.stringify(session.state));
-    // Mirror the new state into the encrypted vault so a fresh
-    // device can decrypt everything on first unlock. Best-effort —
-    // if the vault write fails (vault locked, server down, etc.)
-    // the per-resource sync above already kept the server in sync.
-    try {
-      const { saveVault } = await import("./crypto/vault-sync.mjs");
-      await saveVault(session.state);
-    } catch (e) {
-      console.warn("[sync] vault mirror failed:", e?.message || e);
-    }
-    setServerOnline(true);
-  } else {
-    setServerOnline(false, new Error("Some sync operations failed"));
-  }
-}
-
-/** Alias used by tests + signOut. The per-resource flush above also
- *  mirrors the encrypted vault, so this is the canonical "flush all
- *  pending sync" entry point. */
+// Wire Store.save to the encrypted queue once at boot. The function is
+// also visible in dev tools for diagnostics.
 async function flushVaultSync() {
-  return flushSync();
-}
+  if (!session.state?.profile?.userId || !getUnlockState().isUnlocked) {
+    syncPending = false;
+    return;
+  }
+  if (syncInFlight) return;
 
-/**
- * Compute the list of per-resource operations needed to bring the
- * server from `prev` to `cur`. Returns an array of op descriptors.
- */
-function computeDiffs(prev, cur) {
-  const ops = [];
-  if (!prev || !cur) return ops;
-
-  // --- Expenses ---
-  const prevExp = new Map((prev.expenses || []).map((e) => [e.id, e]));
-  for (const e of (cur.expenses || [])) {
-    const old = prevExp.get(e.id);
-    if (!old) {
-      ops.push({ type: "expense-create", expense: e });
-    } else if (JSON.stringify(old) !== JSON.stringify(e)) {
-      ops.push({ type: "expense-update", id: e.id, expense: e });
-    }
-    prevExp.delete(e.id);
-  }
-  for (const e of prevExp.values()) {
-    ops.push({ type: "expense-delete", id: e.id });
-  }
-
-  // --- Categories ---
-  const prevCat = new Map((prev.categories || []).map((c) => [c.id, c]));
-  for (const c of (cur.categories || [])) {
-    const old = prevCat.get(c.id);
-    if (!old) {
-      ops.push({ type: "category-create", category: c });
-    } else if (JSON.stringify(old) !== JSON.stringify(c)) {
-      ops.push({ type: "category-update", id: c.id, category: c });
-    }
-    prevCat.delete(c.id);
-  }
-  for (const c of prevCat.values()) {
-    ops.push({ type: "category-delete", id: c.id });
-  }
-
-  // --- Splits ---
-  // Splits are stored as self-contained JSON blobs (with userId
-  // denormalised onto the row), so we strip that field before
-  // comparing so the equality check isn't fooled by transient writes.
-  const stripSplit = (s) => {
-    if (!s) return s;
-    const { userId, ...rest } = s;
-    return rest;
-  };
-  const prevSplits = new Map((prev.splits || []).map((s) => [s.id, stripSplit(s)]));
-  for (const s of (cur.splits || [])) {
-    const old = prevSplits.get(s.id);
-    const next = stripSplit(s);
-    if (!old) {
-      ops.push({ type: "split-create", split: s });
-    } else if (JSON.stringify(old) !== JSON.stringify(next)) {
-      ops.push({ type: "split-update", id: s.id, split: s });
-    }
-    prevSplits.delete(s.id);
-  }
-  for (const s of prevSplits.values()) {
-    ops.push({ type: "split-delete", id: s.id });
-  }
-
-  // --- Budgets (whole-blob replace) ---
-  if (JSON.stringify(prev.budgets || {}) !== JSON.stringify(cur.budgets || {})) {
-    ops.push({ type: "budgets-put", budgets: cur.budgets || { monthly: {} } });
-  }
-
-  // --- Settings (merge patch) ---
-  const prevSet = prev.settings || {};
-  const curSet = cur.settings || {};
-  const settingsChanged = Object.keys({ ...prevSet, ...curSet }).some(
-    (k) => prevSet[k] !== curSet[k]
-  );
-  if (settingsChanged) {
-    ops.push({ type: "settings-put", patch: { ...curSet } });
-  }
-
-  // --- Profile (name / phone / avatar / loginDays) ---
-  // loginDays lives at the top level of state (not inside .profile),
-  // but it's user-scoped metadata that belongs on the user record.
-  // We diff it here so the server stays in sync with the streak
-  // counter — without this, the server never learns about new login
-  // days and the streak fails to persist across devices.
-  const prevProf = prev.profile || {};
-  const curProf = cur.profile || {};
-  const profilePatch = {};
-  for (const k of ["name", "phone", "avatarDataUrl"]) {
-    if (prevProf[k] !== curProf[k]) profilePatch[k] = curProf[k];
-  }
-  const prevDays = JSON.stringify(Array.isArray(prev.loginDays) ? prev.loginDays : []);
-  const curDays  = JSON.stringify(Array.isArray(cur.loginDays)  ? cur.loginDays  : []);
-  if (prevDays !== curDays) {
-    profilePatch.loginDays = Array.isArray(cur.loginDays) ? cur.loginDays : [];
-  }
-  if (Object.keys(profilePatch).length > 0) {
-    ops.push({ type: "profile-patch", patch: profilePatch });
-  }
-
-  return ops;
-}
-
-async function executeOp(userId, op) {
-  switch (op.type) {
-    case "expense-create":
-      await Expenses.create({ ...op.expense, userId });
-      break;
-    case "expense-update":
-      await Expenses.update(op.id, { ...op.expense, userId });
-      break;
-    case "expense-delete":
-      await Expenses.remove(op.id);
-      break;
-    case "category-create":
-      await Categories.create({ ...op.category, userId });
-      break;
-    case "category-update":
-      await Categories.update(op.id, { ...op.category, userId });
-      break;
-    case "category-delete":
-      await Categories.remove(op.id);
-      break;
-    case "budgets-put":
-      await Budgets.put(op.budgets);
-      break;
-    case "settings-put":
-      await Settings.put(op.patch);
-      break;
-    case "profile-patch":
-      await Auth.updateProfile(op.patch);
-      break;
-    case "split-create":
-      // Splits are stored as a JSON blob that already carries userId /
-      // id; we forward everything as-is.
-      // eslint-disable-next-line no-console
-      console.log("[sync] split-create → POST /api/splits", { id: op.split.id, title: op.split.title });
-      await Splits.create({ ...op.split, userId });
-      break;
-    case "split-update":
-      // eslint-disable-next-line no-console
-      console.log("[sync] split-update → PUT /api/splits/" + op.id);
-      await Splits.update(op.id, { ...op.split, userId });
-      break;
-    case "split-delete":
-      // eslint-disable-next-line no-console
-      console.log("[sync] split-delete → DELETE /api/splits/" + op.id);
-      await Splits.remove(op.id);
-      break;
-    default:
-      // eslint-disable-next-line no-console
-      console.warn("[sync] unknown op type:", op.type);
+  syncInFlight = true;
+  syncPending = false;
+  try {
+    await saveEncryptedVault(session.state);
+    setServerOnline(true);
+  } catch (err) {
+    setServerOnline(false, err);
+    throw err;
+  } finally {
+    syncInFlight = false;
+    if (syncPending && !syncTimer) syncToServer();
   }
 }
 
@@ -568,7 +362,7 @@ function mountThemeToggle() {
     cycleTheme();
     const pref = getThemePref();
     Store.updateSettings(session.state, { theme: pref });
-    // Persist via the standard path (localStorage + server).
+    // Persist through the encrypted vault path.
     Store.save(session.state);
     syncToServer();
     updateThemeButton();
@@ -585,8 +379,8 @@ function renderDashboard(container) {
     openAddExpenseModal,
     refresh: () => render(),
     // Resolve the LIVE state at call time. `session.state` is replaced
-    // (not mutated) by hydrateFromServer()/afterUnlock()/auto-unlock, so
-    // a closure that captured `state` at render time can go stale. Quick
+    // (not mutated) by afterUnlock()/auto-unlock, so a closure that
+    // captured `state` at render time can go stale. Quick
     // Add must write to the current object or the entry lands in a
     // detached copy and never shows up in the re-rendered dashboard.
     getState: () => session.state,
@@ -929,7 +723,7 @@ function renderSettings(container) {
     $acctAction.value = "";
     if (action === "sync") {
       try {
-        await flushSync();
+        await flushVaultSync();
         toast("Synced", "success");
       } catch (err) {
         toast("Sync failed: " + (err?.message || "unknown"), "error");
@@ -962,26 +756,17 @@ function renderSettings(container) {
   });
   async function doErase() {
     try {
-      // Erase per-resource: delete all expenses + categories + splits,
-      // reset budgets + settings. PUT /api/data is gone, so we fan out.
-      const exps = session.state.expenses || [];
-      for (const e of exps) {
-        try { await Expenses.remove(e.id); } catch { /* ignore */ }
-      }
-      const cats = (session.state.categories || []).filter((c) => !c.isDefault);
-      for (const c of cats) {
-        try { await Categories.remove(c.id); } catch { /* ignore */ }
-      }
-      const splits = session.state.splits || [];
-      for (const s of splits) {
-        try { await Splits.remove(s.id); } catch { /* ignore */ }
-      }
-      try { await Budgets.put({ monthly: {} }); } catch { /* ignore */ }
-      Store.clearTopLevelData(session.state);
-      Store.save(session.state);
-      lastKnownServerState = JSON.parse(JSON.stringify(session.state));
+      const userId = session.state?.profile?.userId || "";
+      await Crypto.deleteVault();
+      await Crypto.putMasterKey([]);
+      await clearVaultCache(userId);
+      await clearLocalDeviceKey(userId);
+      lockVault();
+      session.state = Store.reset();
+      await Auth.signout().catch(() => {});
+      if (typeof window !== "undefined") window.__xpensicCurrentUserId = "";
       toast("All server data erased", "success");
-      render();
+      bootLoginGate();
     } catch (err) {
       toast("Could not erase: " + (err?.message || "unknown"), "error");
     }
@@ -1068,13 +853,16 @@ function confirmSignOut() {
 async function signOut() {
   // Flush any pending writes before we lose the session.
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; syncPending = false; }
-  try { await flushSync(); } catch { /* ignore — we're signing out anyway */ }
+  try { await flushVaultSync(); } catch { /* ignore — we're signing out anyway */ }
+  const userId = session.state?.profile?.userId || "";
   // Wipe the local device key from IndexedDB so the next sign-in
   // on this browser re-prompts for the master password. Without
   // this, signing out and closing the tab would still let anyone
   // with access to this browser auto-unlock the next account that
   // signs in here.
-  try { await clearLocalDeviceKey(session.state?.profile?.userId || ""); } catch { /* ignore */ }
+  try { await clearLocalDeviceKey(userId); } catch { /* ignore */ }
+  try { await clearVaultCache(userId); } catch { /* ignore */ }
+  lockVault();
   try { await Auth.signout(); } catch { /* even if the server is down, clear locally */ }
   // Clear the active-session flag so any in-flight 401 retries from
   // the just-cleared session don't bounce the user back to a now-
@@ -1082,12 +870,7 @@ async function signOut() {
   if (typeof window !== "undefined") {
     window.__xpensicCurrentUserId = "";
   }
-  // Reset the diff baseline so the next sign-in starts with a fresh
-  // snapshot instead of the just-cleared user's data.
-  lastKnownServerState = null;
-  Store.updateProfile(session.state, { userId: "", name: "", phone: "", avatarDataUrl: "" });
-  Store.clearTopLevelData(session.state);
-  Store.save(session.state);
+  session.state = Store.reset();
   toast("Signed out", "success");
   if (window.location.hash !== "#/dashboard") {
     history.replaceState(null, "", "#/dashboard");
@@ -1200,15 +983,7 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
   mountUnlock({
     profile: { name: user.name || "", userId: user.userId },
     onUnlocked: (state) => {
-      afterUnlock(state, { justSignedUp, passwordUnlock: true }).then(() => {
-        // Same rationale as tryDeviceAutoUnlock: pull the live
-        // per-resource state from the server so the user immediately
-        // sees categories/expenses added from other devices. The
-        // vault is the source of truth but can lag by one or two
-        // syncs; /api/data is the authoritative read for "what the
-        // server currently has." Non-fatal if it fails.
-        hydrateFromServer().catch(() => {});
-      }).catch(() => {});
+      afterUnlock(state, { justSignedUp, passwordUnlock: true }).catch(() => {});
     },
   });
 }
@@ -1246,15 +1021,13 @@ async function tryDeviceAutoUnlock({ user, wraps }) {
     catch { return false; }
     setMasterKey(mk);
     let state = null;
-    try { state = await loadEncryptedVault(); } catch { state = null; }
+    try { state = await loadEncryptedVault({ userId: user.userId }); } catch { state = null; }
     if (!state) return false;
-    // Adopt the server-side profile so name/avatar are fresh.
+    // The vault owns private profile fields. Only bind its state to the
+    // authenticated account id supplied by the auth session.
     state.profile = {
       ...(state.profile || {}),
       userId: user.userId,
-      name: user.displayName || state.profile?.name || "",
-      phone: user.phone || state.profile?.phone || "",
-      avatarDataUrl: user.avatarDataUrl || state.profile?.avatarDataUrl || "",
     };
     session.state = state;
     // afterUnlock is now async (it awaits ensureDeviceWrap so the
@@ -1263,15 +1036,6 @@ async function tryDeviceAutoUnlock({ user, wraps }) {
     // exists (that's why auto-unlock succeeded), so ensureDeviceWrap
     // will be a no-op. Fire-and-forget is fine.
     afterUnlock(state, { justSignedUp: false }).catch(() => {});
-    // Best-effort: also pull the live per-resource state from the
-    // server. The encrypted vault can lag by one or two syncs (the
-    // vault mirror is best-effort and runs after the per-resource
-    // POSTs succeed). A quick GET /api/data here ensures the
-    // dashboard reflects the most recent server-side changes
-    // (e.g. categories added from another device) on the next
-    // render. Failures are non-fatal — the vault is the source of
-    // truth and we already have it loaded.
-    hydrateFromServer().catch(() => {});
     return true;
   } catch (err) {
     // Any unexpected error → silent fallback to manual unlock.
@@ -1335,7 +1099,7 @@ async function ensureDeviceWrap({ user, mk, existingWraps }) {
 
 /**
  * Common post-unlock path. Hydrates the in-memory state from the
- * vault, records today's login day, persists to localStorage, and
+ * vault, records today's login day, persists the encrypted envelope, and
  * mounts the app shell.
  *
  * `passwordUnlock` should be true when the user just entered their
@@ -1344,16 +1108,14 @@ async function ensureDeviceWrap({ user, mk, existingWraps }) {
  * IndexedDB so the 7-day periodic re-auth window resets.
  */
 async function afterUnlock(state, { justSignedUp = false, freshVault = false, passwordUnlock = false } = {}) {
+  const signedInUserId = session.state?.profile?.userId || state?.profile?.userId || "";
   session.state = state;
+  if (signedInUserId) {
+    session.state.profile = { ...(session.state.profile || {}), userId: signedInUserId };
+  }
   if (!Array.isArray(session.state.loginDays)) session.state.loginDays = [];
   Store.recordLoginDay(session.state, todayISO());
   Store.save(session.state);
-  // CRITICAL: diff-sync baseline. Without this, flushSync() exits
-  // early and entries never reach the server/vault.
-  if (!lastKnownServerState) {
-    try { lastKnownServerState = JSON.parse(JSON.stringify(session.state)); }
-    catch (e) { console.warn("[boot] baseline snapshot failed:", e?.message || e); }
-  }
   if (typeof window !== "undefined") {
     window.__xpensicCurrentUserId = session.state.profile?.userId || "";
   }
@@ -1380,8 +1142,7 @@ async function afterUnlock(state, { justSignedUp = false, freshVault = false, pa
     console.warn("[boot] ensureDeviceWrap failed:", err?.message || err);
   }
   if (passwordUnlock) {
-    const userId = session.state.profile?.userId;
-    if (userId) touchLastUnlockAt(userId).catch(() => {});
+    if (signedInUserId) touchLastUnlockAt(signedInUserId).catch(() => {});
   }
   syncToServer();
   mountAppShell();
@@ -1389,125 +1150,6 @@ async function afterUnlock(state, { justSignedUp = false, freshVault = false, pa
 
 function readMasterKeySafe() {
   try { return readMasterKey(); } catch { return null; }
-}
-
-async function hydrateFromServer() {
-  try {
-    const res = await Data.get();
-    // Normalize the server blob to the current schema the client expects.
-    // The server already seeds fresh users at SCHEMA_VERSION, but be
-    // defensive — older accounts in the DB may be on v5.
-    let raw = res.data || {};
-    // Backfill required top-level fields before running migration so
-    // validate() inside Store doesn't reject the blob.
-    if (typeof raw.version !== "number") raw.version = 5;
-    if (!Array.isArray(raw.categories)) raw.categories = [];
-    if (!Array.isArray(raw.expenses)) raw.expenses = [];
-    if (!Array.isArray(raw.splits)) raw.splits = [];
-    if (!raw.budgets || typeof raw.budgets !== "object") raw.budgets = { monthly: {} };
-    if (!raw.settings || typeof raw.settings !== "object") raw.settings = Store.DEFAULT_SETTINGS;
-    if (!isPlainObject(raw.profile)) {
-      raw.profile = { userId: "", name: "", phone: "", avatarDataUrl: "" };
-    }
-    if (!isPlainObject(raw.profiles)) raw.profiles = {};
-    // CRITICAL: run the schema migration so v5 server blobs get the new
-    // default categories (Food & Dining, Internet & Mobile, Travel, etc.)
-    // added on the client side. Without this call the UI keeps showing
-    // the old 8-category list because the server returns the user's
-    // pre-upgrade blob verbatim.
-    raw = migrate(raw);
-    // Make sure the profile reflects the signed-in user (the server's
-    // blob may not have the latest name/avatar from a recent update).
-    raw.profile = {
-      ...raw.profile,
-      userId: session.state.profile.userId,
-      name: session.state.profile.name,
-      phone: session.state.profile.phone,
-      avatarDataUrl: session.state.profile.avatarDataUrl,
-    };
-
-    // CRITICAL: don't clobber local state with stale server data if the
-    // user has been making changes since we kicked off this fetch.
-    // The original implementation blindly replaced `session.state` with
-    // `raw`, which silently dropped any locally-added expense or budget
-    // and made the dashboard show only the server's older view. The
-    // merge rule is: for each list, take the union by id, preferring
-    // the local copy on conflicts (local is fresher — the sync path
-    // pushes it up asynchronously). Settings/profile are scalar so
-    // we keep local there too.
-    //
-    // `cur` is captured BEFORE the fetch so we can merge against the
-    // exact state that was live when hydration started. Because `cur`
-    // holds a reference to the same object as `session.state`, any
-    // mutations the user makes while the fetch is in flight (e.g. a
-    // Quick Add expense pushed onto `session.state.expenses`) are
-    // visible through `cur.expenses` too — the merge below picks them
-    // up automatically.
-    const cur = session.state;
-    const mergeById = (localArr, serverArr) => {
-      const out = [];
-      const seen = new Set();
-      for (const item of localArr || []) {
-        out.push(item);
-        seen.add(item.id);
-      }
-      for (const item of serverArr || []) {
-        if (item && item.id && !seen.has(item.id)) out.push(item);
-      }
-      return out;
-    };
-    session.state = {
-      ...raw,
-      // Merge lists so any items added locally (not yet pushed to the
-      // server at the moment this fetch started) are preserved.
-      expenses: mergeById(cur.expenses, raw.expenses),
-      categories: mergeById(cur.categories, raw.categories),
-      splits: mergeById(cur.splits, raw.splits),
-      // Budgets: object keyed by monthKey+categoryId. Local wins on
-      // any conflict; server-only months are pulled in.
-      budgets: {
-        monthly: {
-          ...(raw.budgets?.monthly || {}),
-          ...(cur.budgets?.monthly || {}),
-        },
-      },
-      // Settings + profile: local wins. The server is the authoritative
-      // store, but local changes made after the fetch started have not
-      // been pushed yet so we'd otherwise lose them.
-      settings: { ...(raw.settings || {}), ...(cur.settings || {}) },
-      profile: { ...(raw.profile || {}), ...(cur.profile || {}) },
-    };
-    Store.save(session.state);
-    // Snapshot the hydrated state so the diff sync knows what the server
-    // already has — subsequent mutations only push what actually changed.
-    //
-    // CRITICAL FIX (Quick Add silently lost): this baseline MUST reflect
-    // what the SERVER currently holds — NOT the merged session.state.
-    // The merge above folds locally-added-but-not-yet-pushed expenses
-    // into session.state; snapshotting that made the diff-sync believe
-    // the server already had them, so no POST /api/expenses ever fired
-    // ("no footprint in dev tools") and the entries vanished on reload.
-    // Basing the snapshot on the raw server payload keeps those local
-    // items "pending", so the next flushSync() pushes them up.
-    lastKnownServerState = JSON.parse(JSON.stringify({
-      ...session.state,
-      expenses: raw.expenses || [],
-      categories: raw.categories || [],
-      splits: raw.splits || [],
-      budgets: { monthly: { ...(raw.budgets?.monthly || {}) } },
-      settings: { ...(raw.settings || {}) },
-    }));
-    setServerOnline(true);
-  } catch (err) {
-    setServerOnline(false, err);
-    throw err;
-  }
-}
-
-// Tiny inline polyfill of isPlainObject so we don't have to import the
-// store module just for one helper. Keeps `migrate` happy.
-function isPlainObject(v) {
-  return v && typeof v === "object" && !Array.isArray(v);
 }
 
 // ---- Bootstrap -------------------------------------------------------------
@@ -1546,7 +1188,8 @@ async function init() {
     bootLoginGate();
   });
 
-  // Seed an in-memory state from localStorage as a cache / offline fallback.
+  // Start with an empty in-memory state. The encrypted vault is loaded only
+  // after the authenticated user unlocks it.
   const cache = Store.load();
   session.state = cache.state;
   if (!cache.ok) {

@@ -168,7 +168,7 @@ export async function mountUnlock({ onUnlocked, profile }) {
   }
   async function finishUnlock() {
     let state = null;
-    try { state = await loadVault(); }
+    try { state = await loadVault({ userId: profile?.userId || "" }); }
     catch (e) { console.warn("[unlock] vault load failed", e); }
     if (!state) {
       // Fresh account — seed an empty v6 state.

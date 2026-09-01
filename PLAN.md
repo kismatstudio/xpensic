@@ -1,9 +1,9 @@
 # XPENSIC — Project Plan
 
-A lightweight, single-user expense tracker that runs entirely in the browser. No build step, no backend, no install — just open `index.html`.
+A lightweight expense tracker with browser-side end-to-end encryption, account authentication, and encrypted multi-device sync.
 
 > **Stack:** HTML + CSS + Vanilla JavaScript
-> **Storage:** Browser `localStorage` (with optional JSON file import/export)
+> **Storage:** In-memory state plus an encrypted vault envelope in IndexedDB/server storage
 > **Goal:** A real personal finance tool that is fast, private, and works offline.
 
 ---
@@ -18,7 +18,6 @@ A lightweight, single-user expense tracker that runs entirely in the browser. No
 - Run offline, with zero dependencies, on any modern browser.
 
 ### Non-Goals (for v1)
-- Multi-user accounts, cloud sync, or auth.
 - Bank integration or automatic transaction import.
 - Mobile app / PWA install (the responsive layout will work on mobile, but no service worker in v1).
 - Multi-currency conversion (single currency per session, configurable).
@@ -67,30 +66,24 @@ A lightweight, single-user expense tracker that runs entirely in the browser. No
 
 ## 4. Information Architecture
 
-### Data model (localStorage)
+### Data model (encrypted vault)
 
 ```jsonc
-// key: "expense-tracker:v1"
+// Serialized locally, then encrypted with the vault master key.
 {
   "version": 1,
   "settings": {
-    "currency": "USD",          // ISO code, symbol derived
+    "currency": "USD",
     "currencySymbol": "$",
-    "currencyPosition": "before", // "before" | "after"
+    "currencyPosition": "before",
     "dateFormat": "YYYY-MM-DD",
     "theme": "light"
   },
   "categories": [
-    { "id": "cat_food",      "name": "Food",           "color": "#ef4444", "isDefault": true  },
-    { "id": "cat_transport", "name": "Transport",      "color": "#3b82f6", "isDefault": true  },
-    { "id": "cat_housing",   "name": "Housing",        "color": "#10b981", "isDefault": true  }
-    // ...
+    { "id": "cat_food", "name": "Food", "color": "#ef4444", "isDefault": true },
+    { "id": "cat_transport", "name": "Transport", "color": "#3b82f6", "isDefault": true }
   ],
-  "budgets": {
-    "monthly": {
-      "2026-07": { "cat_food": 400, "cat_transport": 150 }
-    }
-  },
+  "budgets": { "monthly": { "2026-07": { "cat_food": 400 } } },
   "expenses": [
     {
       "id": "exp_01J...",
@@ -106,9 +99,10 @@ A lightweight, single-user expense tracker that runs entirely in the browser. No
 ```
 
 ### Storage rules
-- Single namespaced key: `expense-tracker:v1`.
-- All writes go through a `store` module that reads, mutates, validates, and writes back atomically.
-- On schema mismatch, surface a non-blocking warning (do **not** silently lose data).
+- The active state is held in memory and persisted only as an encrypted vault envelope.
+- The server stores account metadata, encrypted master-key wraps, and encrypted vault envelopes.
+- The client encrypts before every local or remote persistence operation.
+- On schema or decryption mismatch, surface an error rather than silently losing data.
 
 ---
 
@@ -122,10 +116,8 @@ Single-page app with three primary views, switched via a left sidebar (collapses
 │              ├──────────────────────────────────────────────┤
 │  Dashboard   │                                              │
 │  Expenses    │            ACTIVE VIEW                       │
-│  Budgets     │                                              │
 │  Categories  │                                              │
 │  Settings    │                                              │
-│              │                                              │
 │  ─────────   │                                              │
 │  Import/Exp. │                                              │
 └──────────────┴──────────────────────────────────────────────┘
@@ -179,7 +171,8 @@ Expense-tracker/
 │   └── components.css      # buttons, cards, tables, modals, charts
 ├── js/
 │   ├── main.js             # app bootstrap, router, view mounting
-│   ├── store.js            # localStorage read/write + validation
+│   ├── store.js            # in-memory state + validation
+│   ├── crypto/             # vault encryption, key wraps, encrypted cache
 │   ├── ids.js              # ULID/crypto.randomUUID wrapper
 │   ├── format.js           # currency, date, percent formatters
 │   ├── validators.js       # amount, date, category checks
@@ -204,9 +197,9 @@ Expense-tracker/
 ```
 
 ### Module boundaries
-- **Views** are pure render functions: `(state, container) => void`. They never touch `localStorage` directly.
+- **Views** are pure render functions: `(state, container) => void`. They never touch persistence directly.
 - **Main** wires events → store mutations → re-render.
-- **Store** is the only module that reads/writes `localStorage`. Everything else goes through it.
+- **Store** owns in-memory mutations; the crypto vault module owns encrypted persistence.
 - **No globals** — use ES modules (`<script type="module">`).
 
 ### Why vanilla?

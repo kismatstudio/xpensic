@@ -30,8 +30,8 @@ const recovery = read("js/crypto/recovery.mjs");
 // ---- Section 1: master-key wraps are the source of truth --------
 
 console.log("\n[1] crypto primitives are correctly wired");
-check("vault uses XChaCha20-Poly1305 AEAD",
-  /xchacha20-poly1305/.test(vault) && /aeadEncrypt/.test(vault));
+check("vault uses AES-GCM-256 AEAD",
+  /aes-gcm-256/.test(vault) && /aeadEncrypt/.test(vault));
 check("keystore uses PBKDF2-HMAC-SHA256 for password wraps",
   /pbkdf2/i.test(keystore) && /wrapWithPassword/.test(keystore));
 check("keystore supports phrase wraps",
@@ -73,7 +73,7 @@ check("main.js calls mountUnlock when wraps exist (after device auto-unlock atte
 check("main.js calls mountVaultSetup when no wraps exist",
   /wraps\.length === 0/.test(main) && /mountVaultSetup/.test(main));
 check("main.js records the login day AFTER unlock (post-hydrate)",
-  /afterUnlock[\s\S]{0,400}recordLoginDay/.test(main));
+  /afterUnlock[\s\S]{0,1000}recordLoginDay/.test(main));
 check("main.js promotes an unlocked session into a persistent device wrap",
   /ensureDeviceWrap/.test(main) && /wrapWithDeviceKey/.test(main));
 check("main.js attempts device-wrap auto-unlock before the unlock screen",

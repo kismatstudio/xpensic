@@ -1,12 +1,12 @@
-// Server entry — a tiny Express + JSON-file backend that powers auth and
-// per-user data sync for the XPENSIC client.
+// Server entry — a tiny Express + D1 backend that powers authentication and
+// opaque encrypted-vault sync for the XPENSIC client.
 //
 // Architecture:
-//   • One process, one SQLite file (`expense-tracker.db`).
+//   • Local development uses one SQLite file; production uses Cloudflare D1.
 //   • Stateless auth via signed JWT in an httpOnly cookie. The client
 //     reads the cookie automatically via `withCredentials: true`.
-//   • Per-user data is stored as a single JSON blob keyed by userId, so
-//     we don't need a separate table per field. Keeps the schema tiny.
+//   • Vault data is stored as opaque ciphertext; only account metadata is
+//     readable by this process.
 //
 // Run with `npm run start` (or `node src/server.js`). The port defaults
 // to 8787 and is overridable with PORT. Set JWT_SECRET in production.
@@ -18,15 +18,7 @@ import { isEmailLive } from "./email.js";
 import { initDb } from "./d1.js";
 import { initCryptoDb } from "./crypto-d1.js";
 import { authRouter } from "./routes/auth.js";
-import { dataRouter } from "./routes/data.js";
-import { expensesRouter } from "./routes/expenses.js";
-import { categoriesRouter } from "./routes/categories.js";
-import { budgetsRouter, settingsRouter } from "./routes/budgets.js";
-import { splitsRouter } from "./routes/splits.js";
 import { cryptoRouter } from "./routes/crypto.js";
-import { devicesRouter } from "./routes/devices.js";
-import { pairRouter } from "./routes/pair.js";
-import { blobsRouter } from "./routes/blobs.js";
 import { authRequired } from "./middleware/auth.js";
 
 // Pick up RESEND_API_KEY / RESEND_FROM / etc. from a local .env file
@@ -96,24 +88,11 @@ export function buildApp() {
     res.json({ ok: true, ts: Date.now() });
   });
 
-  // Auth routes (signup, signin, send-otp, verify-otp, signout, profile).
+  // Auth routes (signup, signin, OTP, reset, and signout).
   app.use("/api/auth", authRouter);
 
-  // Per-user data routes — expenses / categories / budgets / settings.
-  // All routes require a valid JWT cookie.
-  app.use("/api/data", authRequired, dataRouter);
-  app.use("/api/expenses", authRequired, expensesRouter);
-  app.use("/api/categories", authRequired, categoriesRouter);
-  app.use("/api/budgets", authRequired, budgetsRouter);
-  app.use("/api/settings", authRequired, settingsRouter);
-  app.use("/api/splits", authRequired, splitsRouter);
-
-  // E2EE routes — crypto wraps, vault blob, devices, pairing, blobs.
-  // The server is a dumb relay for these; every value is AEAD ciphertext.
+  // E2EE routes — the server stores only opaque wraps and vault envelopes.
   app.use("/api/crypto", authRequired, cryptoRouter);
-  app.use("/api/devices", authRequired, devicesRouter);
-  app.use("/api/pair", authRequired, pairRouter);
-  app.use("/api/blobs", authRequired, blobsRouter);
 
   // Centralized error handler. Catches anything thrown in routes and
   // returns a JSON error. Keep the surface minimal: don't leak stacks.

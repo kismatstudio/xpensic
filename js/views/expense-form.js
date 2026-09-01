@@ -266,7 +266,7 @@ export function buildExpenseForm({ categories, expense }) {
   form.appendChild(noteGroup.root);
 
   // --- Receipt (encrypted attachment) -------------------------------------
-  // The file is encrypted client-side (XChaCha20-Poly1305 via blobs.mjs)
+  // Attachments will use the same client-side vault encryption boundary.
   // BEFORE it leaves the device; only the ciphertext reaches the server.
   // The blobId is stored on the expense record (metadata only).
   const receiptField = document.createElement("div");

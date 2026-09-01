@@ -10,17 +10,13 @@
 //     dance, no WASM init
 //
 // Algorithm choices:
-//   • AES-GCM-256            for symmetric AEAD (replaces XChaCha20-Poly1305)
-//   • PBKDF2-HMAC-SHA256     for password-based KDF (replaces Argon2id)
-//   • ECDSA P-256             for signing (replaces Ed25519)
-//   • ECDH P-256              for key exchange (replaces X25519)
+//   • AES-GCM-256 for symmetric authenticated encryption
+//   • PBKDF2-HMAC-SHA256 for password-based key derivation
+//   • P-256 ECDSA/ECDH when a key exchange is needed
 //
-// AES-GCM and XChaCha20-Poly1305 are both 256-bit AEAD ciphers with
-// 128-bit tags and comparable performance; AES-GCM wins on
-// browser/native acceleration. PBKDF2 is the conservative choice
-// when Argon2 isn't available — it's not as memory-hard but it's
-// still resistant to brute force when used with high iteration
-// counts.
+// AES-GCM is available through the browser's native implementation. PBKDF2
+// uses a high iteration count because Web Crypto does not provide a memory-
+// hard password KDF.
 //
 // Every binary value that crosses a JSON boundary uses base64url
 // (no padding) — stable across runtimes, matches the encoding used

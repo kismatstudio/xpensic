@@ -11,6 +11,23 @@ yarn.lock
 # Runtime artifacts from the custom dev server (dev-server.cjs)
 dev-server.log
 dev-server.pid
+*.log
+*.pid
+*.db
+*.sqlite
+*.sqlite3
+
+# Local secrets and development archives
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.zip
+.commandcode/
+netstat*
 
 # Editor / OS
 .vscode/

@@ -1,11 +1,10 @@
 # XPENSIC
 
-A lightweight, single-user expense tracker that runs entirely in your
-browser. No build step, no backend, no install — just open `index.html`
-and start tracking.
+A lightweight expense tracker with browser-side end-to-end encryption,
+account authentication, and encrypted multi-device sync.
 
-> **Status:** Phase 9 (polish) — feature-complete per the [PLAN.md](PLAN.md).
-> Stack: HTML + CSS + Vanilla JavaScript, ES modules, zero dependencies.
+> **Status:** Encrypted-vault staging release.
+> Stack: HTML + CSS + Vanilla JavaScript, ES modules, no client build step.
 
 ---
 
@@ -20,11 +19,10 @@ and start tracking.
 - **Dashboard** — KPI cards (this-month total, vs. last month delta, daily average, today), category breakdown chart, recent expenses, and budget alerts that link to the Budgets view.
 - **Import / Export** — full-state JSON backup and round-trip-safe CSV of expenses. The CSV opens directly in **Google Sheets** (File → Import → Upload) and **Microsoft Excel** (just double-click). No conversion needed.
 - **Account & multi-device** — sign up with email or 10-digit mobile + password; sign in on any device and your data is there. OTP sign-in (demo mode) for users who don't want to remember a password.
+- **End-to-end encrypted vault** — expenses, categories, budgets, splits, settings, profile data, and login history are encrypted in the browser before upload. The server stores ciphertext and key wraps only.
 - **Categories with icons** — every category has an emoji icon (🍔 Food, 🚗 Transport, 🏠 Housing, …). Custom categories get to pick from an icon grid.
-- **Theme** — light, dark, or follow system. No flash on load.
 - **Currency** — INR by default, but any ISO code with a custom symbol and position is supported. Indian digit grouping (`1,23,456.78`) is the default for INR.
 - **Voice entry** (Chrome / Edge) — say "Coffee 180" and the expense is captured with the right amount, date, and category suggestion.
-- **Expense splitter** — split bills with friends, trips, or roommates and see per-head amounts instantly.
 - **Keyboard shortcuts** — `n` to add, `/` to search, letters to navigate, `t` to cycle theme, `?` for the full help.
 
 ---
@@ -32,52 +30,51 @@ and start tracking.
 ## Run
 
 This is a static web app with no build step. You need a local HTTP server
-because ES modules don't load over `file://`.
+because ES modules do not load over `file://`.
 
 ```bash
-# Client only (offline / localStorage mode). Use this if you don't want
-# a server — but you won't get multi-device sign-in, OTP, or cloud backup.
+# Client + encrypted local cache. A server is required for accounts and
+# multi-device sync; the browser stores only encrypted vault envelopes.
 npm run dev          # starts the custom dev server on :8765
 
-# Full mode with auth + multi-device data sync. Requires the small
-# Node backend in ./server.
+# Full mode with auth + encrypted multi-device sync.
 cd server && npm install && npm start      # backend on :8787
 npm run dev                                # client on :8765
 
-# Or any other static server. This repo also ships a tiny custom one:
+# Or any other static server:
 node dev-server.cjs
 # then open http://127.0.0.1:8765/
 ```
 
 The backend defaults to `http://127.0.0.1:8787`. See
 [`server/README.md`](server/README.md) for the API, environment
-variables, and a `npm run smoke` test that boots the server in-process
-and exercises every route.
+variables, and the encrypted-boundary smoke test.
 
 If you'd rather skip the server entirely, you can drag `index.html`
-into a modern browser — but ES module imports and the auth flow work
-best over `http://`.
+into a modern browser, but account sync and the encrypted cloud vault
+require the backend.
 
 ---
 
 ## Data
 
-When the backend is running, your data lives in a small JSON file on
-the server (see `server/expense-tracker.db.json`). `localStorage` is
-still used as an offline cache so the app stays usable when the
-backend is unreachable. Sign out wipes the local cache; signing in
-again reloads everything from the server.
+The browser keeps the active state in memory. When the backend is
+available, the client encrypts the complete state with the vault master
+key and uploads one opaque envelope to `/api/crypto/vault`. The local
+cache contains the same encrypted envelope, never the decrypted state.
 
-Without the backend (offline mode), everything stays in `localStorage`
-under the key `expense-tracker:v1`. If you clear site data, use a
-private window, or switch browsers, your data is gone unless you've
-exported a backup.
+The server stores account identifiers, authentication hashes, encrypted
+master-key wraps, and encrypted vault envelopes. It cannot read vault
+contents. Clearing site data removes the local cache; the server vault
+can be recovered only with the vault password, recovery phrase, or a
+trusted device wrap.
 
 ### Recommended backup workflow
 
-- **Weekly**: Export JSON from Settings → Data. Save the file somewhere
-  safe (cloud drive, email to yourself, version control). JSON captures
-  **everything** — categories, expenses, budgets, profile.
+- **Weekly**: Export JSON from Settings → Data. This is a plaintext
+  backup created locally, so save it somewhere safe (cloud drive, email
+  to yourself, version control). JSON captures **everything** —
+  categories, expenses, budgets, profile.
 - **Before any big change**: Export JSON. The Replace dialog asks
   for confirmation.
 - **For Excel / Google Sheets**: click *Export for Sheets/Excel (CSV)*
@@ -178,7 +175,7 @@ Expense-tracker/
 │   └── components.css
 └── js/
     ├── main.js               # hash router, mounts views
-    ├── store.js              # versioned localStorage store
+    ├── store.js              # in-memory state store
     ├── theme.js              # light/dark/system, no-flash boot
     ├── format.js             # currency + date formatters
     ├── validators.js
@@ -188,6 +185,7 @@ Expense-tracker/
     ├── backup.js             # JSON full-state export/import + file helpers
     ├── keyboard.js           # global keyboard shortcuts
     ├── boot-theme.js         # synchronous head script (no theme flash)
+    ├── crypto/               # vault encryption, key wraps, and encrypted cache
     ├── components/
     │   ├── modal.js
     │   ├── confirm.js

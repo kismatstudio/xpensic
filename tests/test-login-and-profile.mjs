@@ -31,18 +31,16 @@ const util = read("js/util.js");
 
 // ---- Section 1: api.js exports the surface we use ------------------------
 
-console.log("\n[1] js/api.js exports the auth/data clients");
+console.log("\n[1] js/api.js exports the auth/crypto clients");
 check("api.js exports Auth.signup",      /signup:\s*\(body\)/.test(api));
 check("api.js exports Auth.signin",      /signin:\s*\(body\)/.test(api));
 check("api.js exports Auth.signout",     /signout:\s*\(/.test(api));
 check("api.js exports Auth.whoami",      /whoami:\s*\(/.test(api));
 check("api.js exports Auth.sendOtp",     /sendOtp:\s*\(/.test(api));
 check("api.js exports Auth.verifyOtp",   /verifyOtp:\s*\(/.test(api));
-check("api.js exports Data.get",         /get:\s*\(\)/.test(api));
-check("api.js exports Expenses.create",  /create:\s*\(expense\)/.test(api));
-check("api.js exports Categories.create",/create:\s*\(category\)/.test(api));
-check("api.js exports Budgets.put",      /put:\s*\(budgets\)/.test(api));
-check("api.js exports Settings.put",     /put:\s*\(patch\)/.test(api));
+check("api.js exports Crypto.getVault",  /getVault:\s*\(\)/.test(api));
+check("api.js exports Crypto.putVault",  /putVault:\s*\(blob,\s*revision/.test(api));
+check("api.js exports Crypto.deleteVault", /deleteVault:/.test(api));
 check("api.js sends credentials: include", /credentials:\s*"include"/.test(api));
 check("api.js throws ApiError on failure",  /class ApiError/.test(api));
 
@@ -143,10 +141,10 @@ check("profile Edit calls Store.updateProfile",            /Store\.updateProfile
 // ---- Section 6: main.js wiring -------------------------------------------
 
 console.log("\n[6] main.js: server-backed auth wiring");
-check("main.js imports Auth + Data from api.js",           /from\s+"\.\/api\.js"/.test(main));
+check("main.js imports Auth + Crypto from api.js",         /Auth,\s+Crypto/.test(main));
 check("main.js calls Auth.whoami on boot",                 /Auth\.whoami\(\)/.test(main));
 check("main.js calls Crypto.getVault to hydrate after unlock", /Crypto\.getVault/.test(main) || /loadVault/.test(main) || /loadVault/.test(read("js/views/unlock.js")));
-check("main.js calls syncToServer after mutations",        /syncToServer\(\)/.test(main));
+check("main.js calls encrypted sync after mutations",       /saveEncryptedVault/.test(main) && /syncToServer\(\)/.test(main));
 check("signOut calls Auth.signout",                        /Auth\.signout\(/.test(main));
 check("signOut flushes pending sync before clearing",      /await\s+flushVaultSync/.test(main) || /await\s+flushSync/.test(main) || /await\s+syncToServer/.test(main));
 check("signOut uses replaceState (no render flash)",       /history\.replaceState/.test(main));

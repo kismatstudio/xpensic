@@ -82,11 +82,11 @@ check("Store.computeLoginStreak is exported",
 check("freshState seeds loginDays as an empty array",
   /loginDays:\s*\[\]/.test(store));
 
-console.log("\n[5] Store.load backfills loginDays for older states");
-check("Store.load backfills loginDays to [] when missing",
-  /if\s*\(!Array\.isArray\(parsed\.loginDays\)\)/.test(store));
-check("Store.load validates loginDays entries against YYYY-MM-DD",
-  /loginDays\s*=\s*parsed\.loginDays\.filter\([\s\S]*?YYYY-MM-DD/.test(store));
+console.log("\n[5] Store keeps loginDays in memory for encrypted vault persistence");
+check("Store.load starts with loginDays in the fresh state",
+  /load\(\)\s*\{\s*return\s*\{[\s\S]*?state:\s*freshState\(\)/.test(store));
+check("loginDays is not read from plaintext localStorage",
+  !/localStorage\.getItem\(STORAGE_KEY\)/.test(store));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
