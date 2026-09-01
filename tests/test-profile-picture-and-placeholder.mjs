@@ -100,10 +100,10 @@ check("generateHeroAvatarDataUrl returns distinct paths for distinct animals",
 // The new avatar pack ships as real SVG files under /logos/avatars/, so
 // the helper returns a path instead of an inlined data-URL. Each path
 // must point at an existing asset so the <img> never 404s.
-check("every animal id maps to an existing avatar file",
+check("every animal id maps to an existing PNG avatar file",
   heroes.every((h) => {
     const url = utilMod.generateHeroAvatarDataUrl(h.id);
-    return typeof url === "string" && url.startsWith("/logos/avatars/") && url.endsWith(".svg");
+    return typeof url === "string" && url.startsWith("/logos/avatars/") && url.endsWith(".png");
   }));
 check("generateHeroAvatarDataUrl falls back for unknown id (uses first animal)",
   utilMod.generateHeroAvatarDataUrl("nonexistent_zzz") ===
@@ -152,6 +152,11 @@ check("Save handler resolves pendingAvatar / avatarRemoved / fallback",
 check("Save persists via Store.updateProfile + Store.save",
   /Store\.updateProfile\(state[\s\S]{0,80}avatarDataUrl:\s*avatarToSave/.test(profile)
   && /Store\.save\(state\)/.test(profile));
+check("profile picture can save without a name",
+  !/if\s*\(!name\)\s*\{/.test(profile));
+check("empty mobile input is accepted",
+  /const rawPhone = body\.querySelector\("#prof-phone"\)\.value\.trim\(\)/.test(profile)
+  && /const phoneResult = rawPhone\s*\n\s*\? validateIndianPhone\(rawPhone\)\s*\n\s*:\s*\{ ok: true, value: "" \}/.test(profile));
 check("Save calls refreshNav so the drawer chip refreshes",
   /typeof ctx\.refreshNav\s*===\s*"function"[\s\S]{0,200}ctx\.refreshNav\(\)/.test(profile));
 
@@ -203,23 +208,19 @@ check("drawer profile host renders an .app-nav__brand block",
   /<div class="app-nav__brand">/.test(main));
 check("brand block sits above the profile card",
   /<div class="app-nav__brand">[\s\S]{0,2000}<div class="app-nav__profile-card">/.test(main));
-check("brand block contains a light-mode SVG logo",
-  /class="app-nav__brand-mark app-nav__brand-mark--light"[\s\S]{0,200}src="logos\/xpensic-light\.svg"/.test(main));
-check("brand block contains a dark-mode SVG logo",
-  /class="app-nav__brand-mark app-nav__brand-mark--dark"[\s\S]{0,200}src="logos\/xpensic-dark\.svg"/.test(main));
-check("brand block contains the 'Track expenses. Take control.' tagline",
-  /class="app-nav__brand-tagline"[^>]*>Track expenses\. Take control\.</.test(main));
-check("layout.css styles .app-nav__brand-mark as the SVG logo lockup",
-  /\.app-nav__brand-mark\s*\{[\s\S]{0,400}(width:\s*120px)/.test(read("css/layout.css")));
+check("brand block contains a light-mode PNG logo",
+  /class="app-nav__brand-mark app-nav__brand-mark--light"[\s\S]{0,200}src="assets\/brand\/xpensic-light\.png"/.test(main));
+check("brand block contains a dark-mode PNG logo",
+  /class="app-nav__brand-mark app-nav__brand-mark--dark"[\s\S]{0,200}src="assets\/brand\/xpensic-dark\.png"/.test(main));
+check("layout.css styles the brand image",
+  /\.app-nav__brand-mark\s*\{[\s\S]{0,400}width:\s*160px/.test(read("css/layout.css")));
 
 // Login-gate brand: full SVG lockup + live tagline
 console.log("\n[7b] login.js: gate brand block");
-check("gate renders a light-mode SVG logo",
-  /class="login-gate__mark login-gate__mark--light"[\s\S]{0,200}src="logos\/xpensic-light\.svg"/.test(read("js/views/login.js")));
-check("gate renders a dark-mode SVG logo",
-  /class="login-gate__mark login-gate__mark--dark"[\s\S]{0,200}src="logos\/xpensic-dark\.svg"/.test(read("js/views/login.js")));
-check("gate renders the 'Track expenses. Take control.' tagline as live text",
-  /class="login-gate__tagline"[^>]*>Track expenses\. Take control\.</.test(read("js/views/login.js")));
+check("gate renders a light-mode PNG logo",
+  /class="login-gate__mark login-gate__mark--light"[\s\S]{0,200}src="assets\/brand\/xpensic-light\.png"/.test(read("js/views/login.js")));
+check("gate renders a dark-mode PNG logo",
+  /class="login-gate__mark login-gate__mark--dark"[\s\S]{0,200}src="assets\/brand\/xpensic-dark\.png"/.test(read("js/views/login.js")));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

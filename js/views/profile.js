@@ -159,13 +159,13 @@ export function renderProfile(container, ctx) {
       </div>
 
       <div class="field">
-        <label class="field__label" for="prof-name">Name</label>
+        <label class="field__label" for="prof-name">Name (optional)</label>
         <input class="field__input" id="prof-name" type="text" maxlength="60"
                value="${escapeHtml(p.name || "")}" autocomplete="name" />
         <div class="field__error" id="prof-name-error" hidden></div>
       </div>
       <div class="field">
-        <label class="field__label" for="prof-phone">Mobile number</label>
+        <label class="field__label" for="prof-phone">Mobile number (optional)</label>
         <div class="login-gate__phone-wrap">
           <span class="login-gate__phone-prefix" aria-hidden="true">+91</span>
           <input class="field__input login-gate__phone-input" id="prof-phone"
@@ -186,11 +186,13 @@ export function renderProfile(container, ctx) {
       onAction: (v) => {
         if (!v) return true;
         const name = body.querySelector("#prof-name").value.trim();
-        const phoneResult = validateIndianPhone(body.querySelector("#prof-phone").value);
+        const rawPhone = body.querySelector("#prof-phone").value.trim();
+        const phoneResult = rawPhone
+          ? validateIndianPhone(rawPhone)
+          : { ok: true, value: "" };
         const $nameErr = body.querySelector("#prof-name-error");
         const $phoneErr = body.querySelector("#prof-phone-error");
         let hasError = false;
-        if (!name) { $nameErr.textContent = "Please enter your name."; $nameErr.hidden = false; hasError = true; }
         if (!phoneResult.ok) { $phoneErr.textContent = phoneResult.error; $phoneErr.hidden = false; hasError = true; }
         if (hasError) return false;
 
