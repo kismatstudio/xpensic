@@ -1,0 +1,255 @@
+/* ────────────────────────────────────────────────────────────────────────
+   Xpensic — Feedback System
+   Floating "Share Feedback" button + multi-step feedback modal.
+   Reuses the design tokens (colors, spacing, radii, motion) and the
+   existing .modal / .btn / .field component styles.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* ─── Floating feedback button ─────────────────────────────────────────── */
+.feedback-fab {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 900;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 44px;
+  padding: 0 16px 0 14px;
+  border-radius: var(--radius-pill);
+  background: rgba(15, 23, 42, 0.85);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  transition:
+    background var(--dur-med) var(--ease-out),
+    color var(--dur-med) var(--ease-out),
+    border-color var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-spring),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+:root[data-theme="light"] .feedback-fab {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 23, 42, 0.08);
+  color: #0F172A;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+}
+
+.feedback-fab:hover {
+  background: var(--grad-primary);
+  color: #ffffff;
+  border-color: transparent;
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: var(--shadow-glow-primary);
+}
+
+.feedback-fab:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+.feedback-fab:active { transform: scale(0.97); }
+
+.feedback-fab__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Label: refined, slightly smaller typography to match the slim pill. */
+.feedback-fab__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* On mobile, collapse to a round icon-only button. */
+@media (max-width: 640px) {
+  .feedback-fab {
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+  .feedback-fab__label { display: none; }
+}
+
+/* Hide the FAB while the app is locked (login / unlock / setup gates). */
+body.app-locked .feedback-fab { display: none; }
+
+/* ─── Feedback modal ───────────────────────────────────────────────────── */
+.feedback-modal {
+  max-width: 520px;
+}
+
+.feedback-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.feedback-modal__intro {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
+/* ─── Step 1: type picker ──────────────────────────────────────────────── */
+.feedback-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.feedback-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-med) var(--ease-out),
+    border-color var(--dur-med) var(--ease-out),
+    transform var(--dur-med) var(--ease-spring),
+    box-shadow var(--dur-med) var(--ease-out);
+}
+
+.feedback-type-card:hover {
+  border-color: var(--glass-border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.feedback-type-card.is-selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  box-shadow: var(--shadow-glow-primary);
+}
+
+.feedback-type-card:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.feedback-type-card__icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.feedback-type-card__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.feedback-type-card__hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+/* ─── Step 2: form ─────────────────────────────────────────────────────── */
+.feedback-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.feedback-form__type {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.feedback-form__back {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.feedback-form__back:hover {
+  background: var(--glass-bg-soft);
+  color: var(--color-text);
+}
+
+.feedback-form__type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.feedback-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* ─── Step 3: success ──────────────────────────────────────────────────── */
+.feedback-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  padding: var(--space-5) 0;
+}
+
+.feedback-success__icon {
+  font-size: 44px;
+  line-height: 1;
+}
+
+.feedback-success__title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.feedback-success__text {
+  margin: 0;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.feedback-success__sub {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.feedback-success__done {
+  margin-top: var(--space-2);
+}

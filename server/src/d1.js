@@ -123,3 +123,65 @@ export async function getRefreshToken(tokenHash) {
 export async function deleteRefreshToken(tokenHash) {
   await requireDb().prepare("DELETE FROM refresh_tokens WHERE tokenHash = ?").bind(tokenHash).run();
 }
+
+// --- Feedback ----------------------------------------------------------------
+
+function rowToFeedback(r) {
+  return {
+    id:          r.id,
+    userId:      r.userId,
+    userEmail:   r.userEmail || "",
+    type:        r.type,
+    subject:     r.subject,
+    description: r.description,
+    status:      r.status || "new",
+    currentPage: r.currentPage || "",
+    browser:     r.browser || "",
+    deviceType:  r.deviceType || "",
+    appVersion:  r.appVersion || "",
+    submittedAt: r.submittedAt || "",
+    createdAt:   r.createdAt || "",
+    updatedAt:   r.updatedAt || "",
+  };
+}
+
+/**
+ * Insert a new feedback record. `status` defaults to "new" at the schema
+ * level; we also default it here so the returned object is accurate even
+ * if a caller omits it.
+ */
+export async function createFeedback(f) {
+  const now = new Date().toISOString();
+  const row = {
+    id:          f.id,
+    userId:      f.userId,
+    userEmail:   f.userEmail || "",
+    type:        f.type,
+    subject:     f.subject,
+    description: f.description,
+    status:      f.status || "new",
+    currentPage: f.currentPage || "",
+    browser:     f.browser || "",
+    deviceType:  f.deviceType || "",
+    appVersion:  f.appVersion || "",
+    submittedAt: f.submittedAt || now,
+    createdAt:   f.createdAt || now,
+    updatedAt:   f.updatedAt || now,
+  };
+  await requireDb()
+    .prepare(
+      `INSERT INTO feedback
+         (id, userId, userEmail, type, subject, description, status,
+          currentPage, browser, deviceType, appVersion, submittedAt,
+          createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      row.id, row.userId, row.userEmail, row.type, row.subject,
+      row.description, row.status, row.currentPage, row.browser,
+      row.deviceType, row.appVersion, row.submittedAt, row.createdAt,
+      row.updatedAt
+    )
+    .run();
+  return rowToFeedback(row);
+}

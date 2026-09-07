@@ -203,5 +203,16 @@ export const Crypto = {
 
 export const health = () => request("/api/health");
 
+// --- Feedback -------------------------------------------------------------
+//
+// Submit user feedback (bug report, feature request, or general feedback).
+// The server associates the record with the authenticated user, persists
+// it, and fires a Resend notification email. Only authenticated users can
+// call this (the route is mounted behind authRequired).
+
+export const Feedback = {
+  submit: (body) => request("/api/feedback", { method: "POST", body }),
+};
+
 // Surface the configured base for diagnostics (e.g. login screen banner).
 export const apiBase = BASE;

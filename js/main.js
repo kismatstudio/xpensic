@@ -35,6 +35,8 @@ import {
   formatIndianPhone, generateAvatarDataUrl,
 } from "./util.js";
 import { Auth, Crypto, apiBase, ApiError } from "./api.js";
+import { mountFeedbackButton } from "./feedback.js";
+import { KismatFooter } from "./components/kismat-footer.js?v=13";
 import { getDeviceKey, isAvailable as deviceKeyAvailable, clearDeviceKey as clearLocalDeviceKey, needsReauth, touchLastUnlockAt } from "./crypto/device-key.mjs";
 import { unwrapWithDeviceKey, wrapWithDeviceKey, newDeviceKey, getDeviceId } from "./crypto/keystore.mjs";
 import {
@@ -954,6 +956,8 @@ function mountAppShell() {
   mountNavToggle();
   mountNavActions();
   mountThemeToggle();
+  mountFeedbackButton();
+  KismatFooter();
   mountKeyboardShortcuts(
     (route) => { window.location.hash = `#/${route}`; },
     {
@@ -1186,6 +1190,7 @@ async function afterUnlock(state, { justSignedUp = false, freshVault = false, pa
   Store.save(session.state);
   if (typeof window !== "undefined") {
     window.__xpensicCurrentUserId = session.state.profile?.userId || "";
+    window.__xpensicProfileName = session.state.profile?.name || "";
   }
   session.firstRun = justSignedUp || freshVault;
   if (freshVault) toast("Your encrypted vault is ready.", "success", 3500);
