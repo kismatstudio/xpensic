@@ -347,7 +347,7 @@ function mountNavActions() {
       } else if (action === "create-budget") {
         window.location.hash = "#/budgets";
       } else if (action === "scan-receipt") {
-        toast("Coming Soon", "info");
+        toast("Coming Soon", "info", 3400, { center: true });
       }
     });
   });
