@@ -1,7 +1,7 @@
 // Tiny REST client for the expense-tracker backend.
 //
 // The API is served from the SAME ORIGIN as the client (the dev
-// server proxies /api/* to the backend on port 8787). This avoids
+// server proxies /api/* to the backend on port 8790). This avoids
 // all cross-origin cookie issues — incognito mode, strict SameSite,
 // and different-port localhost all work seamlessly.
 //
@@ -202,6 +202,17 @@ export const Crypto = {
 // --- Health ---------------------------------------------------------------
 
 export const health = () => request("/api/health");
+
+// --- Feedback -------------------------------------------------------------
+//
+// Submit user feedback (bug report, feature request, or general feedback).
+// The server associates the record with the authenticated user, persists
+// it, and fires a Resend notification email. Only authenticated users can
+// call this (the route is mounted behind authRequired).
+
+export const Feedback = {
+  submit: (body) => request("/api/feedback", { method: "POST", body }),
+};
 
 // Surface the configured base for diagnostics (e.g. login screen banner).
 export const apiBase = BASE;

@@ -1,4 +1,12 @@
-name = "xpensic-staging-api"
+cd D:\xpensic\server
+
+# 1) Your Resend API key
+npx wrangler secret put RESEND_API_KEY
+# → prompt appears, paste your re_xxxxxxxxxxxxxxxxxxxx key, press Enter
+
+# 2) The verified "From" sender (staging uses the non-prod toml)
+npx wrangler secret put RESEND_FROM
+# → enter:  XPENSIC <no-reply@kismatstudio.com>name = "xpensic-staging-api"
 main = "src/worker.js"
 # 2026-08-04 or later enables nodejs_compat_v2 by default, which bundles
 # the extra polyfills (streams, etc.) that body-parser/iconv-lite need.

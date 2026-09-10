@@ -50,8 +50,24 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   expiresAt TEXT DEFAULT '',
   parent TEXT DEFAULT '',
   createdAt TEXT DEFAULT ''
+);CREATE TABLE IF NOT EXISTS feedback (
+  id          TEXT PRIMARY KEY,
+  userId      TEXT NOT NULL,
+  userEmail   TEXT DEFAULT '',
+  type        TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  description TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'new',
+  currentPage TEXT DEFAULT '',
+  browser     TEXT DEFAULT '',
+  deviceType  TEXT DEFAULT '',
+  appVersion  TEXT DEFAULT '',
+  submittedAt TEXT DEFAULT '',
+  createdAt   TEXT DEFAULT '',
+  updatedAt   TEXT DEFAULT ''
 );
-`;
+CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(userId);
+CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);`;
 
 function normalizeRow(row) {
   if (!row) return row;

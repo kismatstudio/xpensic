@@ -38,7 +38,7 @@ because ES modules do not load over `file://`.
 npm run dev          # starts the custom dev server on :8765
 
 # Full mode with auth + encrypted multi-device sync.
-cd server && npm install && npm start      # backend on :8787
+cd server && npm install && npm start      # backend on :8790
 npm run dev                                # client on :8765
 
 # Or any other static server:
@@ -46,7 +46,7 @@ node dev-server.cjs
 # then open http://127.0.0.1:8765/
 ```
 
-The backend defaults to `http://127.0.0.1:8787`. See
+The backend defaults to `http://127.0.0.1:8790`. See
 [`server/README.md`](server/README.md) for the API, environment
 variables, and the encrypted-boundary smoke test.
 
