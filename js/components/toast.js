@@ -6,14 +6,16 @@
  * @param {string} message
  * @param {"info"|"success"|"error"} [kind="info"]
  * @param {number} [duration=2600]
+ * @param {{center?: boolean}} [opts]
  */
-export function toast(message, kind = "info", duration = 2600) {
+export function toast(message, kind = "info", duration = 2600, opts) {
+  const centered = !!(opts && opts.center);
   // Find or create the toast region declared in index.html.
-  let region = document.getElementById("toast-region");
+  let region = document.getElementById(centered ? "toast-region-center" : "toast-region");
   if (!region) {
     region = document.createElement("div");
-    region.id = "toast-region";
-    region.className = "toast-region";
+    region.id = centered ? "toast-region-center" : "toast-region";
+    region.className = centered ? "toast--center" : "toast-region";
     region.setAttribute("role", "status");
     region.setAttribute("aria-live", "polite");
     region.setAttribute("aria-atomic", "true");

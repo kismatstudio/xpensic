@@ -658,6 +658,16 @@
   pointer-events: none;
 }
 
+/* ─── Centered toast (used for "Coming Soon") ─────────────────────────── */
+.toast--center {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 110;
+  pointer-events: none;
+}
+
 /* ─── Lock screen ─────────────────────────────────────────────────────── */
 body.app-locked .app { display: none; }
 

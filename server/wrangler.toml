@@ -1,12 +1,21 @@
-cd D:\xpensic\server
+# Staging Worker config for XPENSIC API.
+#
+# Deploy with:
+#   npx wrangler deploy
+# (or: npm run deploy)
+#
+# Pre-requisites:
+#   1. Create the staging D1 database (already done):
+#        npx wrangler d1 create xpensic-staging-e2ee-db
+#   2. Apply the schema:
+#        npx wrangler d1 execute xpensic-staging-e2ee-db --remote --file=./schemas/schema.sql
+#   3. Set secrets (do NOT commit real values):
+#        npx wrangler secret put JWT_SECRET
+#        npx wrangler secret put RESEND_API_KEY
+#        npx wrangler secret put RESEND_FROM
+#        npx wrangler secret put CLIENT_ORIGIN   # e.g. http://127.0.0.1:8765
 
-# 1) Your Resend API key
-npx wrangler secret put RESEND_API_KEY
-# → prompt appears, paste your re_xxxxxxxxxxxxxxxxxxxx key, press Enter
-
-# 2) The verified "From" sender (staging uses the non-prod toml)
-npx wrangler secret put RESEND_FROM
-# → enter:  XPENSIC <no-reply@kismatstudio.com>name = "xpensic-staging-api"
+name = "xpensic-staging-api"
 main = "src/worker.js"
 # 2026-08-04 or later enables nodejs_compat_v2 by default, which bundles
 # the extra polyfills (streams, etc.) that body-parser/iconv-lite need.
