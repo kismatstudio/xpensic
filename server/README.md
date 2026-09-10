@@ -17,21 +17,21 @@ client in the parent directory (`../`).
 ```bash
 cd server
 npm install                # one-time
-npm start                  # starts on PORT (default 8787)
+npm start                  # starts on PORT (default 8790)
 
 # Smoke test (boots the API and checks the E2EE boundary)
 npm run smoke
 ```
 
 Then run the client with `npm run dev` from the parent directory.
-The client talks to `http://127.0.0.1:8787` by default — see
+The client talks to `http://127.0.0.1:8790` by default — see
 [`js/api.js`](../js/api.js).
 
 ### Environment variables
 
 | Variable         | Default                          | What it does                                       |
 |------------------|----------------------------------|----------------------------------------------------|
-| `PORT`           | `8787`                           | HTTP port                                          |
+| `PORT`           | `8790`                           | HTTP port                                          |
 | `JWT_SECRET`     | `dev-secret-change-me`           | Signs the session cookie — **set in production**   |
 | `DB_PATH`        | `:memory:`                       | Local SQLite file (dev only). Omit for in-memory.  |
 | `NODE_ENV`       | _(unset)_                | Set to `production` to enable `Secure` cookies     |
@@ -49,7 +49,7 @@ The frontend defaults to a **same-origin `/api`** path (`window.ET_API_BASE`
 is empty by default). Two things make that work:
 
 1. **Local dev**: `dev-server.cjs` proxies `/api/*` → the local API
-   (`localhost:8787`).
+   (`localhost:8790`).
 2. **Cloudflare Pages**: a **Pages Function**
    (`functions/api/[[path]].js`) proxies `/api/*` → the API Worker.
 

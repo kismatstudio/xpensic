@@ -1,7 +1,7 @@
 // Tiny REST client for the expense-tracker backend.
 //
 // The API is served from the SAME ORIGIN as the client (the dev
-// server proxies /api/* to the backend on port 8787). This avoids
+// server proxies /api/* to the backend on port 8790). This avoids
 // all cross-origin cookie issues — incognito mode, strict SameSite,
 // and different-port localhost all work seamlessly.
 //

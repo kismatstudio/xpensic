@@ -162,10 +162,17 @@ function escapeHtml(s) {
 // fail the user's submission. We therefore never throw — callers check
 // `result.ok` and log on failure.
 
-const FEEDBACK_RECIPIENT = (process.env.FEEDBACK_RECIPIENT || "mail.kismatstudio.com")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+// NOTE: read lazily (inside the function), not as a module-level const.
+// server.js loads this module via a static import, which is hoisted and
+// evaluated before loadEnvFile() runs, so `process.env` isn't populated
+// yet at module-load time. Reading it here, at send-time, is what lets
+// the FEEDBACK_RECIPIENT value from .env actually take effect.
+function feedbackRecipients() {
+  return (process.env.FEEDBACK_RECIPIENT || "kaif@kismatstudio.com")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 const FEEDBACK_TYPE_LABEL = {
   bug:      "Bug Report",
@@ -209,7 +216,7 @@ export async function sendFeedbackEmail(f, opts = {}) {
       },
       body: JSON.stringify({
         from,
-        to: FEEDBACK_RECIPIENT,
+        to: feedbackRecipients(),
         subject,
         html,
         text,

@@ -9,7 +9,7 @@
 //     readable by this process.
 //
 // Run with `npm run start` (or `node src/server.js`). The port defaults
-// to 8787 and is overridable with PORT. Set JWT_SECRET in production.
+// to 8790 and is overridable with PORT. Set JWT_SECRET in production.
 
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -35,7 +35,7 @@ try {
   envFile = null;
 }
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8790);
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
 /**

@@ -15,9 +15,9 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 # Start the authentication API first when its dependencies are installed.
-# The client login gate depends on this service at http://127.0.0.1:8787.
+# The client login gate depends on this service at http://127.0.0.1:8790.
 $serverRoot = Join-Path $PSScriptRoot 'server'
-$apiPort = 8787
+$apiPort = 8790
 $apiPidPath = Join-Path $serverRoot 'server.pid'
 
 function Test-ApiListening {
