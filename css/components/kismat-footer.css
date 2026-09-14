@@ -1,0 +1,63 @@
+/* ────────────────────────────────────────────────────────────────────────
+   KismatFooter — global footer badge
+   Centered glassmorphism pill linking to Kismat Studio. Supports the
+   app's light/dark themes via [data-theme] on <html> and the shared
+   design tokens from tokens.css.
+   ──────────────────────────────────────────────────────────────────────── */
+
+.kismat-footer {
+  display: flex;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.kismat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 9999px;
+  background: var(--glass-bg-strong, rgba(255, 255, 255, 0.7));
+  -webkit-backdrop-filter: var(--glass-blur-strong, blur(12px) saturate(140%));
+  backdrop-filter: var(--glass-blur-strong, blur(12px) saturate(140%));
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.35));
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.06);
+  transition: transform var(--dur-med, 0.25s) var(--ease-out, ease),
+              box-shadow var(--dur-med, 0.25s) var(--ease-out, ease);
+}
+
+.kismat-footer:hover .kismat-pill,
+.kismat-footer:focus-visible .kismat-pill {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.kismat-footer:focus-visible {
+  outline: none;
+}
+.kismat-footer:focus-visible .kismat-pill {
+  outline: 2px solid var(--color-primary, #6366F1);
+  outline-offset: 2px;
+}
+
+.kismat-logo {
+  height: 22px;
+  width: auto;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.kismat-text {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--color-text, #1a1a2e);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* ─── Mobile ──────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .kismat-pill { padding: 0.45rem 0.9rem; }
+  .kismat-text { font-size: 0.75rem; }
+  .kismat-logo { height: 18px; }
+}

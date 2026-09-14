@@ -9,7 +9,7 @@
 //     readable by this process.
 //
 // Run with `npm run start` (or `node src/server.js`). The port defaults
-// to 8787 and is overridable with PORT. Set JWT_SECRET in production.
+// to 8790 and is overridable with PORT. Set JWT_SECRET in production.
 
 import express from "express";
 import cookieParser from "cookie-parser";
@@ -19,6 +19,7 @@ import { initDb } from "./d1.js";
 import { initCryptoDb } from "./crypto-d1.js";
 import { authRouter } from "./routes/auth.js";
 import { cryptoRouter } from "./routes/crypto.js";
+import { feedbackRouter } from "./routes/feedback.js";
 import { authRequired } from "./middleware/auth.js";
 
 // Pick up RESEND_API_KEY / RESEND_FROM / etc. from a local .env file
@@ -34,7 +35,7 @@ try {
   envFile = null;
 }
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8790);
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
 /**
@@ -93,6 +94,10 @@ export function buildApp() {
 
   // E2EE routes — the server stores only opaque wraps and vault envelopes.
   app.use("/api/crypto", authRequired, cryptoRouter);
+
+  // Feedback routes — authenticated users submit bug reports, feature
+  // requests, and general feedback.
+  app.use("/api/feedback", authRequired, feedbackRouter);
 
   // Centralized error handler. Catches anything thrown in routes and
   // returns a JSON error. Keep the surface minimal: don't leak stacks.

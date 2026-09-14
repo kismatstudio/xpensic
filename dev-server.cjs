@@ -4,7 +4,7 @@
 // serving stale copies of edited files in some environments.
 //
 // Also proxies /api/* requests to the backend API server (default
-// http://localhost:8787) so the client and API share the same origin.
+// http://localhost:8790) so the client and API share the same origin.
 // This eliminates cross-origin cookie issues in incognito mode and
 // browsers with strict SameSite enforcement.
 
@@ -14,7 +14,7 @@ const path = require("path");
 const url = require("url");
 
 const PORT = Number(process.env.PORT) || 8765;
-const API_PORT = Number(process.env.API_PORT) || 8787;
+const API_PORT = Number(process.env.API_PORT) || 8790;
 const API_HOST = "127.0.0.1";
 const ROOT = __dirname;
 
