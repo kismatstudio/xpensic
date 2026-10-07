@@ -1,0 +1,94 @@
+name: Claude Code Review
+
+# - Any branch -> staging: reviewed automatically when the PR is opened
+#   (or reopened / marked ready for review).
+# - staging -> main: reviewed only on demand via "Run workflow" in the
+#   Actions tab, passing the PR number.
+#
+# Auth: set the CLAUDE_CODE_OAUTH_TOKEN repository secret
+# (generate it locally with `claude setup-token`).
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    branches: [staging]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Number of the staging -> main PR to review"
+        required: true
+        type: number
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+
+    steps:
+      - name: Validate manual target (staging -> main only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          read -r base head state <<< "$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json baseRefName,headRefName,state --jq '"\(.baseRefName) \(.headRefName) \(.state)"')"
+          echo "PR #$PR_NUMBER: $head -> $base ($state)"
+          if [ "$base" != "main" ] || [ "$head" != "staging" ]; then
+            echo "::error::Manual review is only for staging -> main PRs (got $head -> $base)."
+            exit 1
+          fi
+          if [ "$state" != "OPEN" ]; then
+            echo "::error::PR #$PR_NUMBER is $state, not OPEN."
+            exit 1
+          fi
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ env.PR_NUMBER }}/head
+          fetch-depth: 0
+
+      - name: Run Claude Code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ env.PR_NUMBER }}
+
+            You are reviewing a pull request for XPENSIC, a no-build vanilla JS
+            (ES modules) expense tracker with browser-side end-to-end encryption
+            (libsodium), and a Cloudflare Workers backend in `server/` and
+            `functions/`. Tests live in `tests/` and `server/tests/`.
+
+            Use `gh pr view` and `gh pr diff` to read the PR, and read the
+            surrounding code in the checkout for context. Focus on, in order:
+            1. Correctness bugs and regressions.
+            2. Security, especially the E2EE boundary: plaintext user data,
+               keys or passwords must never reach the server, logs, or storage
+               unencrypted; auth/session handling; input validation.
+            3. Data safety: vault/backup format compatibility, sync conflicts,
+               migrations that could lose or corrupt user data.
+            4. Missing or broken tests for the changed behaviour.
+            5. Only then, notable performance or maintainability issues.
+            Skip pure style nits.
+
+            Post specific issues as inline comments with
+            `mcp__github_inline_comment__create_inline_comment` where possible,
+            then post one summary comment with `gh pr comment` that lists
+            findings by severity (blocking / should fix / optional). If the PR
+            looks good, say so briefly. Be concise and only report issues you
+            have verified against the code.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Glob,Grep"
