@@ -213,6 +213,22 @@ Expense-tracker/
 
 ---
 
+## Code review
+
+Pull requests are reviewed by Claude via
+[`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml):
+
+- **Any branch → `staging`** — reviewed automatically when the PR is
+  opened, reopened, or marked ready for review (drafts are skipped).
+  New pushes to an open PR are not re-reviewed.
+- **`staging` → `main`** — reviewed on demand: Actions →
+  *Claude Code Review* → *Run workflow*, with the PR number.
+
+The workflow file must be identical on `main` for reviews to run, so
+changes to it only take effect once they reach `main`.
+
+---
+
 ## Tested in
 
 Chrome 120+ on Windows. The app should work in any modern browser
