@@ -11,10 +11,10 @@
 // deleted — the user can pick "Other" as the reassignment target if they
 // really want to drop one.
 
-import { Store } from "../store.js";
-import { openModal } from "../components/modal.js";
-import { toast } from "../components/toast.js";
-import { escapeHtml } from "../util.js";
+import { Store } from "../store.js?v=31";
+import { openModal } from "../components/modal.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { escapeHtml } from "../util.js?v=31";
 
 /**
  * Renders the Categories view.
@@ -133,9 +133,11 @@ export function renderCategories(container, { state, refresh }) {
       if (!name) {
         toast("Category name is required", "error");
         return;
-      }      // Keep the existing icon when editing name/color only. The user can
-      // pick a new icon via the Add dialog (which has the icon picker).      Store.updateCategory(state, id, { name, color });
-      Store.save(state);
+            }
+            // Keep the existing icon when editing name/color only. The user can
+            // pick a new icon via the Add dialog (which has the icon picker).
+            Store.updateCategory(state, id, { name, color });
+            Store.save(state);
       editingId = null;
       toast("Category updated", "success");
       renderList();

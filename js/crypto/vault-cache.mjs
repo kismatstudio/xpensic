@@ -1,56 +1,23 @@
+import { createIdb } from "./idb.mjs?v=31";
+
 const DB_NAME = "xpensic_vault_cache";
 const DB_VERSION = 1;
 const STORE = "vaults";
 const LOCAL_PREFIX = "xpensic:encrypted-vault:";
 
-let dbPromise = null;
-
-function openDb() {
-  if (typeof indexedDB === "undefined") return Promise.resolve(null);
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve) => {
-    let request;
-    try {
-      request = indexedDB.open(DB_NAME, DB_VERSION);
-    } catch {
-      resolve(null);
-      return;
+// Defensive IndexedDB access (timeouts, no cached failures, reopen on close)
+// — see idb.mjs for why.
+const idb = createIdb({
+  name: DB_NAME,
+  version: DB_VERSION,
+  store: STORE,
+  upgrade: (db) => {
+    if (!db.objectStoreNames.contains(STORE)) {
+      db.createObjectStore(STORE, { keyPath: "userId" });
     }
-    request.onupgradeneeded = () => {
-      try {
-        if (!request.result.objectStoreNames.contains(STORE)) {
-          request.result.createObjectStore(STORE, { keyPath: "userId" });
-        }
-      } catch {
-        resolve(null);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => resolve(null);
-    request.onblocked = () => resolve(null);
-  });
-  return dbPromise;
-}
-
-async function withStore(mode, operation) {
-  const db = await openDb();
-  if (!db) return null;
-  return new Promise((resolve) => {
-    let transaction;
-    try {
-      transaction = db.transaction(STORE, mode);
-      const request = operation(transaction.objectStore(STORE));
-      let result = null;
-      request.onsuccess = () => { result = request.result ?? null; };
-      request.onerror = () => { result = null; };
-      transaction.oncomplete = () => resolve(result);
-      transaction.onerror = () => resolve(result);
-      transaction.onabort = () => resolve(result);
-    } catch {
-      resolve(null);
-    }
-  });
-}
+  },
+});
+const withStore = idb.withStore;
 
 function localKey(userId) {
   return LOCAL_PREFIX + encodeURIComponent(String(userId));

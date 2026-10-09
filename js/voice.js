@@ -96,7 +96,7 @@ export function startListening(opts = {}) {
     stopped = true;
     clearTimeout(hardTimer);
     clearInterval(tickTimer);
-    const parsed = parseVoiceCommand(finalTranscript, opts.categories);
+    const parsed = parseVoiceCommand(finalTranscript, opts.categories, opts.expenses);
     opts.onFinal?.({
       amount: parsed.amount,
       note: parsed.note,
@@ -176,7 +176,7 @@ export function startListening(opts = {}) {
 //   "rs 450 petrol"                → { amount: 450, note: "petrol", paymentMethod: "cash" }
 //   "₹250 lunch"                    → { amount: 250, note: "lunch", paymentMethod: "cash" }
 
-import { parseQuickAdd, suggestCategory } from "./util.js";
+import { classifyText } from "./categorize.js?v=31";
 
 // Phrases we strip from the note text once we've identified them.
 // Order matters: longer phrases first so "credit card" wins over "card".
@@ -199,9 +199,13 @@ const PAYMENT_PHRASES = [
 // their own — prepositions, articles, and common currency markers. We
 // remove them so "coffee 180 rupees" doesn't save the note as "coffee
 // rupees".
+const CURRENCY_WORDS = String.raw`(?:rupees?|rupay|rs\.?|inr|dollars?|bucks?|euros?|pounds?|quid|yen|dirhams?|riyals?|ringgit|taka|paise|paisa|usd|eur|gbp|aed|sar|pkr|cad|aud)\b`;
+
 const FILLER_WORDS = [
   // Currency markers (₹, rs, rupee, rupees, rupay, inr, dollars, etc.)
-  /\b(?:rupees?|rupay|rs\.?|inr|dollars?|bucks?)\b/gi,
+  new RegExp(String.raw`\b` + CURRENCY_WORDS, "gi"),
+  // Currency symbols (no word boundary applies to these)
+  /[₹$€£¥]/g,
   // Intent prepositions: "coffee for 180", "petrol of 500", "tea at 50"
   // These are very common in voice input and add no information to the note.
   /\b(?:for|of|at|on|to|is|was|were|amount|cost|price|of\s+about|about|around|approximately|approx)\b/gi,
@@ -223,7 +227,7 @@ const FILLER_WORDS = [
  *   categoryId: string,
  * }}
  */
-export function parseVoiceCommand(transcript, categories) {
+export function parseVoiceCommand(transcript, categories, expenses) {
   const text = String(transcript || "").trim();
   const result = {
     amount: null,
@@ -237,7 +241,7 @@ export function parseVoiceCommand(transcript, categories) {
   // 1) Extract the amount. We try a few strategies in order of
   //    specificity. The Web Speech API often returns the amount as a
   //    pretty-written number ("one eighty", "two hundred fifty") so we
-  //    normalise those first; only then do we fall back to parseQuickAdd.
+  //    normalise those first; only then do we fall back to digit matching.
   const amount = extractAmount(text);
   result.amount = amount;
 
@@ -260,8 +264,17 @@ export function parseVoiceCommand(transcript, categories) {
   // Strip the raw numeric amount token (after number-word conversion)
   // so it doesn't pollute the note. We match the literal digits that
   // appeared in the original transcript, not the converted number.
-  const rawNumberMatch = text.match(/(\d{1,7}(?:[.,]\d{1,2})?)/);
-  if (rawNumberMatch) noteText = noteText.replace(rawNumberMatch[0], " ");
+  const token = findAmountToken(text);
+  if (token) {
+    // Remove exactly the number that became the amount ("1 lakh", "1,00,000",
+    // "500") — other numbers ("2 pizzas") stay in the note.
+    noteText = noteText.replace(token.raw, " ");
+  } else if (amount != null) {
+    // Amount was spoken in words ("one lakh", "two hundred fifty") — drop
+    // those number words so they don't end up in the note.
+    noteText = noteText.replace(/\b[a-z]+\b/gi, (w) =>
+      (w.toLowerCase() in NUMBER_WORDS ? " " : w));
+  }
 
   // Strip the currency / filler words. These don't convey meaning in
   // the final note and consistently appear in voice transcripts.
@@ -276,21 +289,13 @@ export function parseVoiceCommand(transcript, categories) {
   if (noteText) result.note = noteText;
   else if (text) result.note = text.replace(/\d+/g, "").replace(/\s+/g, " ").trim();
 
-  // 3) Category: use the existing suggestCategory() helper on the note so
-  //    we get the same keyword map as the rest of the app.
-  if (Array.isArray(categories) && categories.length > 0 && result.note) {
-    try {
-      const match = suggestCategory(result.note);
-      if (match) result.categoryId = match.id;
-    } catch {
-      // Fallback: substring match on category name (only if suggestCategory
-      // ever throws — it normally doesn't).
-      const lc = result.note.toLowerCase();
-      for (const c of categories) {
-        const name = String(c.name || "").toLowerCase();
-        if (name && lc.includes(name)) { result.categoryId = c.id; break; }
-      }
-    }
+  // 3) Category: classify the spoken product with the shared classifier
+  //    (the user's history, their own category names, then a large product
+  //    vocabulary). "Other" when nothing is recognised, so the form never
+  //    keeps an unrelated default.
+  if (Array.isArray(categories) && categories.length > 0 && (result.note || text)) {
+    const match = classifyText(result.note || text, { categories, expenses, fallbackOther: true });
+    if (match) result.categoryId = match.categoryId;
   }
 
   return result;
@@ -329,9 +334,11 @@ export function parseVoiceCommand(transcript, categories) {
  *                   then reset current.
  */
 function extractAmount(text) {
-  // 1) Numeric form (digits, optional decimals, optional currency prefix).
-  const numeric = parseQuickAdd(text);
-  if (numeric.amount != null) return numeric.amount;
+  // 1) Digits (plain, decimal, comma-grouped, or with a lakh/crore/thousand
+  //    word). When several numbers are spoken, findAmountToken picks the one
+  //    that reads as the amount.
+  const token = findAmountToken(text);
+  if (token) return token.value;
 
   // 2) Number-word form. The pattern matches:
   //    - "one eighty"            → 1 * 100 + 80 = 180
@@ -343,11 +350,21 @@ function extractAmount(text) {
   const wordSeq = words.map(englishToNumber).filter((n) => n !== null);
   if (wordSeq.length === 0) return null;
 
+  // `big` holds the finished lakh/crore/thousand part, `total` the finished
+  // hundreds part of the segment being built, `current` the pending digits.
+  let big = 0;
   let total = 0;
   let current = 0;
   let sawAny = false;
   for (const [value, kind] of wordSeq) {
-    if (kind === "magnitude") {
+    if (kind === "big") {
+      // "one lakh", "fifty thousand", "two hundred thousand": multiply
+      // everything spoken since the last big magnitude.
+      const segment = total + current || 1;
+      big += segment * value;
+      total = 0;
+      current = 0;
+    } else if (kind === "magnitude") {
       // current is the coefficient of the magnitude (default 1, so
       // "hundred" alone = 100).
       if (current === 0) current = 1;
@@ -373,8 +390,53 @@ function extractAmount(text) {
     }
     sawAny = true;
   }
-  total += current;
-  return sawAny && total > 0 ? total : null;
+  const result = big + total + current;
+  return sawAny && result > 0 ? result : null;
+}
+
+const SCALE_VALUES = {
+  crore: 10000000, crores: 10000000, cr: 10000000,
+  lakh: 100000, lakhs: 100000, lac: 100000, lacs: 100000,
+  thousand: 1000, k: 1000, hundred: 100,
+};
+
+const CURRENCY_BEFORE = /(?:₹|\$|€|£|¥|\brs\.?|\binr)\s*$/i;
+const CURRENCY_AFTER = new RegExp(String.raw`^\s*(?:[₹$€£¥]|` + CURRENCY_WORDS + ")", "i");
+
+/**
+ * Finds the number in a transcript that is the amount, and returns its value
+ * plus the exact matched text (so callers can strip it from the note).
+ * Understands "500", "12.50", "1,200", "1,00,000", "1 lakh", "1.5 crore",
+ * "5k" and "2 lakh 50 thousand".
+ *
+ * With several numbers ("2 pizzas 500"), a number next to a currency marker
+ * ("₹500", "500 rupees") wins; otherwise the largest one does, since small
+ * numbers in speech are usually quantities.
+ */
+function findAmountToken(text) {
+  const src = String(text);
+  const re = /(\d[\d,]*(?:\.\d+)?)(?:\s*(crores?|cr|lakhs?|lacs?|thousand|k|hundred)\b(?:\s*(?:and\s+)?(\d[\d,]*(?:\.\d+)?)\s*(thousand|k|hundred)\b)?)?/gi;
+  const num = (str) => {
+    // "12,50" (single comma, 1-2 trailing digits) is a decimal; otherwise
+    // commas are digit grouping.
+    if (/^\d+,\d{1,2}$/.test(str)) return parseFloat(str.replace(",", "."));
+    return parseFloat(str.replace(/,/g, ""));
+  };
+  const found = [];
+  for (const m of src.matchAll(re)) {
+    let value = num(m[1]);
+    if (m[2]) value *= SCALE_VALUES[m[2].toLowerCase()];
+    if (m[3]) value += num(m[3]) * SCALE_VALUES[m[4].toLowerCase()];
+    if (!Number.isFinite(value)) continue;
+    const end = m.index + m[0].length;
+    const marked = CURRENCY_BEFORE.test(src.slice(0, m.index)) ||
+      CURRENCY_AFTER.test(src.slice(end));
+    found.push({ value: Math.round(value * 100) / 100, raw: m[0], marked });
+  }
+  if (found.length === 0) return null;
+  const marked = found.filter((f) => f.marked);
+  const pool = marked.length ? marked : found;
+  return pool.reduce((best, f) => (f.value > best.value ? f : best));
 }
 
 const NUMBER_WORDS = {
@@ -384,13 +446,15 @@ const NUMBER_WORDS = {
   sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
   twenty: 20, thirty: 30, forty: 40, fifty: 50,
   sixty: 60, seventy: 70, eighty: 80, ninety: 90,
-  hundred: 100, thousand: 1000,
+  hundred: 100, thousand: 1000, lakh: 100000, lakhs: 100000,
+  lac: 100000, lacs: 100000, crore: 10000000, crores: 10000000,
 };
 
 function englishToNumber(word) {
   if (!(word in NUMBER_WORDS)) return null;
   const v = NUMBER_WORDS[word];
-  if (v === 100 || v === 1000) return [v, "magnitude"];
+  if (v >= 1000) return [v, "big"];
+  if (v === 100) return [v, "magnitude"];
   if (v >= 20 && v < 100) return [v, "ten"];
   return [v, "unit"];
 }

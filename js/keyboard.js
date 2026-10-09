@@ -18,7 +18,7 @@
 //   ?        → open the keyboard help modal
 //   Esc      → close the topmost modal (handled inside openModal)
 
-import { openModal } from "./components/modal.js";
+import { openModal } from "./components/modal.js?v=31";
 
 /**
  * Mount global keyboard shortcuts. `navigate` is the function main.js

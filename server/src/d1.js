@@ -53,10 +53,34 @@ export async function findUserByEmail(email) {
   return results[0] ? rowToUser(results[0]) : null;
 }
 
+/**
+ * Resolves a validated identifier ({ kind, value }) to its account. An email
+ * matches the account's email; a mobile number matches either a phone-only
+ * sign-up or the number saved in an email account's profile, so both log
+ * into the same account.
+ */
+export async function findUserByIdentifier(id) {
+  if (id.kind === "email") return findUserByEmail(id.value);
+  return (await findUserByEmail(`phone:${id.value}`)) || (await findPhoneOwner(id.value));
+}
+
 export async function findUserById(userId) {
   const { results } = await requireDb()
     .prepare("SELECT * FROM users WHERE userId = ? LIMIT 1")
     .bind(userId)
+    .all();
+  return results[0] ? rowToUser(results[0]) : null;
+}
+
+/**
+ * Finds an account that already owns a 10-digit mobile number — either as
+ * its profile phone or as a phone-only sign-up identifier (`phone:<digits>`).
+ * `excludeUserId` lets an account check a number against everyone else.
+ */
+export async function findPhoneOwner(phone, excludeUserId = "") {
+  const { results } = await requireDb()
+    .prepare("SELECT * FROM users WHERE (phone = ? OR lower(email) = ?) AND userId != ? LIMIT 1")
+    .bind(phone, `phone:${phone}`, excludeUserId)
     .all();
   return results[0] ? rowToUser(results[0]) : null;
 }

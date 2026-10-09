@@ -5,21 +5,58 @@
 const STORAGE_KEY = "expense-tracker:theme-pref"; // transient, separate from store
 const VALID = new Set(["light", "dark", "system"]);
 
+// The theme is "system" on the login / sign-up / unlock gates and for any
+// account that hasn't chosen one. Once a user is signed in their own choice
+// applies; it's remembered per account on this device so it can be restored
+// right after the password step (before the encrypted vault is opened).
+const DEFAULT_PREF = "system";
+let currentUserId = "";
+
+function userKey() {
+  return currentUserId ? `${STORAGE_KEY}:${currentUserId}` : "";
+}
+
 function readPref() {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return VALID.has(v) ? v : "dark";
+    return VALID.has(v) ? v : DEFAULT_PREF;
   } catch {
-    return "dark";
+    return DEFAULT_PREF;
   }
 }
 
 function writePref(theme) {
   try {
     localStorage.setItem(STORAGE_KEY, theme);
+    const key = userKey();
+    if (key) localStorage.setItem(key, theme);
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Pre-login screens (sign in, sign up, forgot password, unlock): always the
+ * System theme, whatever the last user picked. Nothing is saved per account.
+ */
+export function enterGateTheme() {
+  currentUserId = "";
+  try { localStorage.setItem(STORAGE_KEY, DEFAULT_PREF); } catch { /* ignore */ }
+  return applyTheme(DEFAULT_PREF);
+}
+
+/**
+ * Called once the server has accepted the sign-in: switch to this account's
+ * remembered theme (System if they never chose one).
+ */
+export function enterUserTheme(userId) {
+  currentUserId = String(userId || "");
+  let pref = DEFAULT_PREF;
+  try {
+    const saved = currentUserId ? localStorage.getItem(userKey()) : null;
+    if (VALID.has(saved)) pref = saved;
+  } catch { /* ignore */ }
+  return setTheme(pref);
 }
 
 function resolve(pref) {

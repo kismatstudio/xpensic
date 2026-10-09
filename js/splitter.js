@@ -13,7 +13,7 @@
 // the friend code is just a stable identifier the user can share verbally
 // or via screenshot; the recipient enters it on their side manually.
 
-import { newId } from "./ids.js";
+import { newId } from "./ids.js?v=31";
 
 /**
  * Compute a split given a total amount and a list of participants.

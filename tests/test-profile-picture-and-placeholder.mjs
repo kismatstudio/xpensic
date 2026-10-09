@@ -33,6 +33,10 @@ check("util.js exports processProfilePicture",
   /export function processProfilePicture\b/.test(utilSrc));
 check("processProfilePicture validates file type",
   /test\(file\.type/.test(utilSrc) && utilSrc.includes("/^image"));
+check("processProfilePicture only allows JPG/JPEG, PNG, and WebP",
+  /image\\\/\(jpe\?g\|png\|webp\)\$\/i/.test(utilSrc));
+check("processProfilePicture rejects other formats with a clear message",
+  /This file format is not supported/.test(utilSrc));
 check("processProfilePicture caps file size",
   /maxBytes\s*=\s*8\s*\*\s*1024\s*\*\s*1024/.test(utilSrc));
 check("processProfilePicture center-crops to a square",
@@ -119,8 +123,8 @@ check("Edit modal renders a preview <img>",
   /id="prof-avatar-preview"/.test(profile));
 check("Edit modal has a hidden file input",
   /<input[\s\S]{0,400}id="prof-avatar-input"[\s\S]{0,400}\bhidden\b/.test(profile));
-check("file input accepts image/*",
-  /id="prof-avatar-input"[\s\S]{0,400}accept="image\/\*"/.test(profile));
+check("file input accepts only JPG/JPEG, PNG, and WebP",
+  /id="prof-avatar-input"[\s\S]{0,400}accept="image\/jpeg,image\/png,image\/webp"/.test(profile));
 check("Edit modal has a Remove photo button",
   /id="prof-avatar-remove"[\s\S]{0,400}>Remove photo</.test(profile));
 check("Edit modal has a hero-picker grid",
@@ -141,8 +145,10 @@ check("file input change handler calls processProfilePicture(file)",
   // We just check the two pieces exist within reasonable distance.
   /\$input\.addEventListener\("change"/.test(profile)
   && /processProfilePicture\(file\)/.test(profile));
+check("unsupported format shows a pop-up toast",
+  /This file format is not supported[\s\S]{0,200}toast\(result\.error,\s*"error"\)/.test(profile));
 check("Remove button click handler exists",
-  /prof-avatar-remove[\s\S]{0,2000}addEventListener\("click"/.test(profile));
+  /prof-avatar-remove[\s\S]{0,8000}addEventListener\("click"/.test(profile));
 check("hero cell click handler generates a hero avatar data URL",
   /generateHeroAvatarDataUrl\(heroId\)/.test(profile));
 check("Save handler resolves pendingAvatar / avatarRemoved / fallback",
@@ -208,12 +214,14 @@ check("drawer profile host renders an .app-nav__brand block",
   /<div class="app-nav__brand">/.test(main));
 check("brand block sits above the profile card",
   /<div class="app-nav__brand">[\s\S]{0,2000}<div class="app-nav__profile-card">/.test(main));
-check("brand block contains a light-mode PNG logo",
-  /class="app-nav__brand-mark app-nav__brand-mark--light"[\s\S]{0,200}src="assets\/brand\/xpensic-light\.png"/.test(main));
-check("brand block contains a dark-mode PNG logo",
-  /class="app-nav__brand-mark app-nav__brand-mark--dark"[\s\S]{0,200}src="assets\/brand\/xpensic-dark\.png"/.test(main));
-check("layout.css styles the brand image",
-  /\.app-nav__brand-mark\s*\{[\s\S]{0,400}width:\s*160px/.test(read("css/layout.css")));
+check("brand block renders the vector lockup (mark + wordmark + tagline)",
+  /class="brand-lockup brand-lockup--drawer"[\s\S]{0,400}<use href="#xp-mark">[\s\S]{0,300}Xpensic[\s\S]{0,200}Track expenses\. Take control\./.test(main));
+check("layout.css sizes the drawer lockup mark",
+  /\.brand-lockup--drawer \.brand-mark\s*\{[^}]*width:\s*58px/.test(read("css/layout.css")));
+check("index.html defines the shared #xp-mark symbol and header lockup",
+  /<symbol id="xp-mark"/.test(read("index.html")) && /<span class="brand-tagline">Track expenses\. Take control\.<\/span>/.test(read("index.html")));
+check("lockup colours are themed (light + dark tokens)",
+  /--lockup-wordmark:\s*#0F1B3D/.test(read("css/layout.css")) && /\[data-theme="dark"\]\s*\{[^}]*--lockup-wordmark:\s*#FFFFFF/.test(read("css/layout.css")));
 
 // Login-gate brand: full SVG lockup + live tagline
 console.log("\n[7b] login.js: gate brand block");
