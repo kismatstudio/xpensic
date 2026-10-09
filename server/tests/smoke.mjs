@@ -111,6 +111,46 @@ async function main() {
       check("refresh succeeds", response.status === 200 && response.body?.ok === true);
     }
 
+    console.log("\n[1b] Mobile numbers belong to one account");
+    {
+      const phone = "9876543210";
+      const json = (method, body) => ({ method, body: JSON.stringify(body) });
+      const put = await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone }), jar);
+      check("profile phone saved", put.status === 200 && put.body?.user?.phone === phone);
+      const dupSignup = await fetchJson(`${base}/api/auth/signup`, json("POST", {
+        identifier: phone, password: "password123", confirmPassword: "password123",
+      }), {});
+      check("sign-up with a profile phone is rejected", dupSignup.status === 409);
+      const dupEmail = await fetchJson(`${base}/api/auth/signup`, json("POST", {
+        identifier: email, password: "password123", confirmPassword: "password123",
+      }), {});
+      check("sign-up with a used email is rejected", dupEmail.status === 409);
+
+      const jarB = {};
+      await fetchJson(`${base}/api/auth/signup`, json("POST", {
+        identifier: `other+${Date.now()}@example.com`, password: "password123", confirmPassword: "password123",
+      }), jarB);
+      const steal = await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone }), jarB);
+      check("another account cannot claim the phone", steal.status === 409);
+      const again = await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone }), jar);
+      check("owner can re-save their own phone", again.status === 200);
+      const viaPhone = await fetchJson(`${base}/api/auth/signin`, json("POST", { identifier: phone, password: "password123" }), {});
+      check("sign-in with the profile phone works", viaPhone.status === 200 && viaPhone.body?.user?.email === email);
+      const viaPhoneBad = await fetchJson(`${base}/api/auth/signin`, json("POST", { identifier: phone, password: "wrong-password" }), {});
+      check("profile phone sign-in still needs the right password", viaPhoneBad.status === 401);
+      const viaEmail = await fetchJson(`${base}/api/auth/signin`, json("POST", { identifier: email, password: "password123" }), {});
+      check("email sign-in still works", viaEmail.status === 200);
+      const bad = await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone: "123" }), jar);
+      check("invalid phone is rejected", bad.status === 400);
+      const anon = await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone }), {});
+      check("phone update needs a session", anon.status === 401);
+
+      await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone: "" }), jar);
+      const free = await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone }), jarB);
+      check("cleared phone can be claimed by another account", free.status === 200);
+      await fetchJson(`${base}/api/auth/phone`, json("PUT", { phone: "" }), jarB);
+    }
+
     console.log("\n[2] Legacy plaintext routes are unavailable");
     for (const path of [
       "/api/data",

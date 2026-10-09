@@ -11,6 +11,30 @@
 
 const BASE = (typeof window !== "undefined" && window.ET_API_BASE) || "";
 
+// Several requests can hit an expired access token at the same moment (a tab
+// waking from the background, boot + sync). The refresh token is single-use,
+// so firing one refresh per request made all but the first fail — which then
+// looked like "session expired". All callers now share ONE refresh, and a Web
+// Lock keeps other tabs from refreshing at the same time.
+let refreshInFlight = null;
+
+function refreshSession() {
+  if (refreshInFlight) return refreshInFlight;
+  const run = async () => {
+    const res = await fetch(BASE + "/api/auth/refresh", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    });
+    return res.ok;
+  };
+  const locked = typeof navigator !== "undefined" && navigator.locks && navigator.locks.request
+    ? () => navigator.locks.request("xpensic-auth-refresh", run)
+    : run;
+  refreshInFlight = locked().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
 async function request(path, { method = "GET", body, timeoutMs = 8000, _retried = false } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -19,6 +43,8 @@ async function request(path, { method = "GET", body, timeoutMs = 8000, _retried 
     res = await fetch(BASE + path, {
       method,
       credentials: "include",
+      // Never serve auth / vault data from the HTTP cache.
+      cache: "no-store",
       headers: body ? { "content-type": "application/json" } : {},
       body: body ? JSON.stringify(body) : undefined,
       signal: ctrl.signal,
@@ -47,11 +73,8 @@ async function request(path, { method = "GET", body, timeoutMs = 8000, _retried 
     !path.includes("/auth/signup")
   ) {
     try {
-      const refreshRes = await fetch(BASE + "/api/auth/refresh", {
-        method: "POST",
-        credentials: "include",
-      });
-      if (refreshRes.ok) {
+      const refreshed = await refreshSession();
+      if (refreshed) {
         // Got a fresh access token — retry the original request.
         return request(path, { method, body, timeoutMs, _retried: true });
       }
@@ -116,6 +139,9 @@ export const Auth = {
   signout: () => request("/api/auth/signout", { method: "POST" }),
   whoami: () => request("/api/auth/whoami"),
   refresh: () => request("/api/auth/refresh", { method: "POST" }),
+  // Save the profile mobile number on the server so it can't be reused by
+  // another account. Rejects with a 409 ApiError if it's already taken.
+  setPhone: (phone) => request("/api/auth/phone", { method: "PUT", body: { phone } }),
   sendOtp: (identifier) =>
     request("/api/auth/send-otp", { method: "POST", body: { identifier } }),
   verifyOtp: (identifier, code) =>

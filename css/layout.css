@@ -35,80 +35,96 @@
 
 .app-header__spacer { flex: 1; }
 
-/* Brand — the new XPENSIC lockup. The X+arrow mark comes from a
-   cropped PNG (assets/brand/mark-light.png and mark-dark.png). The
-    "Xpensic" wordmark and "Track expenses. Take control." tagline are
-   rendered as live HTML so the tagline stays editable and renders
-   with the same crisp typography the rest of the UI uses. */
+/* Brand lockup — vector X+arrow mark + live-text wordmark and tagline.
+   Everything is vector / real text, so it stays crisp on any screen and
+   takes its colours from the --lockup-* tokens below, which swap with the
+   theme (light, dark, and system — which resolves to one of the two). The
+   tagline is never hidden or cropped: on narrow screens it wraps onto a
+   second line instead. */
+:root {
+  --lockup-wordmark: #0F1B3D;
+  --lockup-tagline: #334155;
+  --brand-mark-navy: #0F1B3D;
+}
+[data-theme="dark"] {
+  --lockup-wordmark: #FFFFFF;
+  --lockup-tagline: #D5DEEA;
+  --brand-mark-navy: #8DA2EC;
+}
+
 .app-brand {
   display: inline-flex;
-  align-items: flex-start;
-  padding-top: 0;
-  /* Slight negative margin so the wider lockup sits flush with the
-     hamburger icon on the left without crowding the month picker. */
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
   margin-left: calc(-1 * var(--space-1));
-  gap: var(--space-3);
   transition: transform var(--dur-med) var(--ease-spring);
   text-decoration: none;
   color: var(--color-text);
 }
+.app-brand:hover { transform: scale(1.02); }
 
-.app-brand:hover {
-  transform: scale(1.02);
-}
-
-/* Show the right logo for the active theme. By default both variants
-   are present in the DOM so the browser pre-decodes the inactive one
-   and the swap is instant the moment data-theme flips. */
-[data-theme="light"] .app-brand__logo--dark,
-.app-brand__logo--dark { display: none; }
-[data-theme="light"] .app-brand__logo--light { display: block; }
-[data-theme="dark"] .app-brand__logo--light,
-.app-brand__logo--light { display: none; }
-[data-theme="dark"] .app-brand__logo--dark { display: block; }
-
-/* Full SVG lockup (wordmark included). Sized by width with auto height
-   so proportions stay true and the logo stays crisp on Retina. */
-.app-brand__logo {
-  width: 200px;
-  height: auto;
-  max-width: 100%;
+.brand-mark {
   display: block;
   flex: 0 0 auto;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
+  width: 45px;
+  height: 42px;
 }
-
-/* Tagline below the logo. */
-.app-brand__type {
+.brand-type {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  min-width: 0;
   line-height: 1;
 }
-
-.app-brand__tagline {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--brand-tagline, #475569);
-  opacity: 0.85;
+.brand-wordmark {
+  font-family: var(--font-display, "Inter"), system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--lockup-wordmark);
+}
+.brand-tagline {
+  font-family: var(--font-sans, "Inter"), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 9.5px;
+  line-height: 1.25;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--lockup-tagline);
+  text-wrap: balance;
 }
 
-[data-theme="dark"] .app-brand__tagline {
-  color: #94A3B8;
-}
-
-/* Intermediate breakpoints so the lockup stays balanced across
-   tablet + phone widths. On phones we drop the tagline so the
-   logo still fits comfortably. */
+/* Phones / small tablets: slightly smaller lockup; the tagline wraps to
+   two lines inside the space available rather than being dropped. */
 @media (max-width: 720px) {
-  .app-brand__logo { width: 120px; }
-  .app-brand__tagline { font-size: 10px; }
+  .app-brand { gap: 8px; }
+  .brand-mark { width: 36px; height: 34px; }
+  .brand-wordmark { font-size: 19px; }
+  .brand-tagline { font-size: 8.5px; letter-spacing: 0.06em; }
 }
-@media (max-width: 480px) {
-  .app-brand__tagline { display: none; }
-  .app-brand__logo { width: 110px; }
+
+/* Narrow phones: the lockup, month picker and theme toggle can't share one
+   row without squeezing the tagline, so the header becomes two rows —
+   menu + brand (+ theme icon) on top, month picker underneath. */
+@media (max-width: 560px) {
+  :root { --header-h: 104px; }
+  .app-header {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 6px;
+    column-gap: var(--space-2);
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .app-header__spacer { display: none; }
+  .app-brand { flex: 1 1 0; }
+  .theme-toggle { order: 1; padding: 6px 10px; }
+  .theme-toggle #theme-label { display: none; }
+  .month-picker { order: 2; flex: 1 1 100%; justify-content: space-between; }
+  .month-picker__label { flex: 1 1 auto; }
 }
 
 /* ─── Hamburger icon ──────────────────────────────────────────────────── */
@@ -192,82 +208,17 @@
   border-bottom: 1px solid var(--glass-border);
 }
 
-.app-nav__brand-mark {
-  /* The full SVG lockup (wordmark included) — wider than tall, so we
-     size by width and let height follow to preserve proportions. */
-  width: 160px;
-  height: auto;
-  display: block;
-  flex: 0 0 auto;
-  filter: drop-shadow(0 2px 6px rgba(15, 23, 42, 0.18));
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
-}
-
-/* Theme-aware visibility swap, same pattern as the header. */
-[data-theme="light"] .app-nav__brand-mark--dark,
-.app-nav__brand-mark--dark {
-  display: none;
-}
-[data-theme="light"] .app-nav__brand-mark--light {
-  display: block;
-}
-[data-theme="dark"] .app-nav__brand-mark--light,
-.app-nav__brand-mark--light {
-  display: none;
-}
-[data-theme="dark"] .app-nav__brand-mark--dark {
-  display: block;
-}
-
-/* Stacked wordmark + tagline. Wordmark is the primary read; tagline
-   sits below at a smaller, lighter weight for hierarchy. The
-   container takes the remaining width (mark is flex: 0 0 auto) so
-   the wordmark can grow into the available space. */
-.app-nav__brand-type {
+/* Drawer brand: the same vector lockup, shown larger. */
+.brand-lockup--drawer {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  line-height: 1.15;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  flex: 1 1 auto;
 }
-
-.app-nav__brand-wordmark {
-  font-family: var(--font-display, "Poppins"), "Inter", system-ui, sans-serif;
-  font-weight: 800;
-  font-size: 22px;
-  letter-spacing: -0.02em;
-  color: var(--brand-wordmark, #0F172A);
-  line-height: 1;
-}
-
-.app-nav__brand-tagline {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--brand-tagline, #475569);
-  opacity: 0.85;
-  /* Allow the tagline to wrap on narrow drawers — never truncate. */
-  line-height: 1.25;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-
-[data-theme="dark"] .app-nav__brand-wordmark {
-  color: #F8FAFC;
-}
-[data-theme="dark"] .app-nav__brand-tagline {
-  color: #94A3B8;
-}
-
-/* On the very narrowest drawers, shrink the mark + wordmark so
-   the brand never pushes the profile card out of view. The tagline
-   keeps its full width because wrapping handles it gracefully. */
-@media (max-width: 320px) {
-  .app-nav__brand-mark { width: 100px; height: auto; }
-  .app-nav__brand-tagline { font-size: 10px; }
-}
+.brand-lockup--drawer .brand-mark { width: 58px; height: 54px; }
+.brand-lockup--drawer .brand-type { gap: 5px; flex: 1 1 auto; }
+.brand-lockup--drawer .brand-wordmark { font-size: 28px; }
+.brand-lockup--drawer .brand-tagline { font-size: 10.5px; }
 .app-nav__profile-card {
   /* Wraps the profile link so it shares padding/visual rhythm without
      leaking layout into the surrounding nav shell. The element is a
@@ -391,7 +342,7 @@
 }
 .nav-link.is-active {
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-weight: 600;
   border-left: 3px solid var(--color-primary);
   color: var(--color-text);
@@ -420,7 +371,7 @@
   display: block;
 }
 .nav-link.is-active .nav-link__icon {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   opacity: 1;
 }
 .nav-link__label {
@@ -506,7 +457,7 @@
   width: 22px;
   height: 22px;
   flex: 0 0 auto;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 .app-nav__quick-icon svg {
   width: 100%;
@@ -518,7 +469,7 @@
    the button picks up, so keep the primary colour at full strength. */
 .app-nav__quick-btn:hover .app-nav__quick-icon,
 .app-nav__quick-btn:focus-visible .app-nav__quick-icon {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   opacity: 1;
   filter: drop-shadow(0 0 1px var(--color-primary-soft));
 }
@@ -531,14 +482,25 @@
 }
 
 /* Nav links section — grows to fill remaining space so the footer
-   stays pinned to the bottom. */
+   stays pinned to the bottom. Scrolls internally when the menu is
+   taller than the viewport; the scrollbar is visible (thin, themed)
+   so users can tell there are more options to reach. */
 .app-nav__links {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
 }
-.app-nav__links::-webkit-scrollbar { display: none; }
+.app-nav__links::-webkit-scrollbar { width: 6px; }
+.app-nav__links::-webkit-scrollbar-track { background: transparent; }
+.app-nav__links::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 8px;
+}
+.app-nav__links::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-faint);
+}
 
 .app-nav__footer {
   margin-top: auto;
@@ -648,13 +610,20 @@
 }
 
 /* ─── Toast region ────────────────────────────────────────────────────── */
+/* Toasts appear exactly in the center of the viewport so they never
+   collide with the feedback FAB (bottom-right, z-index 900). The
+   region is a flex column that stacks multiple toasts downward from
+   the center. */
 .toast-region {
   position: fixed;
-  inset: auto var(--space-5) var(--space-5) auto;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
-  z-index: 100;
+  z-index: 950;
   pointer-events: none;
 }
 
@@ -679,7 +648,8 @@ body.app-locked .app { display: none; }
   /* On phones the drawer is narrower, so tighten the brand + profile
      spacing and let the quick actions breathe without crowding. */
   .app-nav__brand { padding: var(--space-3) var(--space-1) var(--space-3); }
-  .app-nav__brand-mark { width: 140px; }
+  .brand-lockup--drawer .brand-mark { width: 50px; height: 47px; }
+  .brand-lockup--drawer .brand-wordmark { font-size: 25px; }
   .app-nav__profile-link { padding: var(--space-2) var(--space-1); }
   .app-nav__quick-btn { padding: 10px var(--space-2); }
 }

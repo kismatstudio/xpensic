@@ -39,9 +39,9 @@ check("main.js has no local formatMonth definition",  !/^function\s+formatMonth/
 check("main.js has no local MONTH_NAMES constant",    !/^const\s+MONTH_NAMES\s*=/m.test(main));
 // The new main.js does the imports but also dynamically imports api.js —
 // just confirm the named imports are in the file somewhere.
-check("main.js imports startOfMonth",   /from\s+"\.\/util\.js"/.test(main) && /\bstartOfMonth\b/.test(main));
-check("main.js imports monthKey",       /from\s+"\.\/util\.js"/.test(main) && /\bmonthKey\b/.test(main));
-check("main.js imports formatMonth",    /from\s+"\.\/util\.js"/.test(main) && /\bformatMonth\b/.test(main));
+check("main.js imports startOfMonth",   /from\s+"\.\/util\.js(?:\?[^"]*)?"/.test(main) && /\bstartOfMonth\b/.test(main));
+check("main.js imports monthKey",       /from\s+"\.\/util\.js(?:\?[^"]*)?"/.test(main) && /\bmonthKey\b/.test(main));
+check("main.js imports formatMonth",    /from\s+"\.\/util\.js(?:\?[^"]*)?"/.test(main) && /\bformatMonth\b/.test(main));
 
 console.log("\n[3] dashboard.js: no local date-helper definitions, helpers imported");
 check("dashboard.js has no local monthKey definition",     !/^function\s+monthKey/m.test(dashboard));
@@ -58,9 +58,9 @@ console.log("\n[4] budgets.js: no local date-helper definitions, helpers importe
 check("budgets.js has no local startOfMonth definition", !/^function\s+startOfMonth/m.test(budgets));
 check("budgets.js has no local monthKey definition",     !/^function\s+monthKey/m.test(budgets));
 check("budgets.js has no local formatMonth definition",  !/^function\s+formatMonth/m.test(budgets));
-check("budgets.js imports startOfMonth", /from\s+"\.\.\/util\.js"/.test(budgets) && /\bstartOfMonth\b/.test(budgets.split("\n").slice(0, 30).join("\n")));
-check("budgets.js imports monthKey",     /from\s+"\.\.\/util\.js"/.test(budgets) && /\bmonthKey\b/.test(budgets.split("\n").slice(0, 30).join("\n")));
-check("budgets.js imports formatMonth",  /from\s+"\.\.\/util\.js"/.test(budgets) && /\bformatMonth\b/.test(budgets.split("\n").slice(0, 30).join("\n")));
+check("budgets.js imports startOfMonth", /from\s+"\.\.\/util\.js(?:\?[^"]*)?"/.test(budgets) && /\bstartOfMonth\b/.test(budgets.split("\n").slice(0, 30).join("\n")));
+check("budgets.js imports monthKey",     /from\s+"\.\.\/util\.js(?:\?[^"]*)?"/.test(budgets) && /\bmonthKey\b/.test(budgets.split("\n").slice(0, 30).join("\n")));
+check("budgets.js imports formatMonth",  /from\s+"\.\.\/util\.js(?:\?[^"]*)?"/.test(budgets) && /\bformatMonth\b/.test(budgets.split("\n").slice(0, 30).join("\n")));
 
 console.log("\n[5] Functional check: imports behave correctly");
 const { startOfMonth, monthKey, formatMonth, todayISO, currentTimeHHMM } = await import("../js/util.js");

@@ -1,3 +1,4 @@
+import { suggestCategoryFromText } from "./categorize.js?v=31";
 // Small shared utilities used across views and components.
 
 // ---------------------------------------------------------------------------
@@ -35,10 +36,13 @@ export function formatIndianPhone(digits) {
  * it as a data: URL. The color is derived deterministically from the phone
  * number (or name as a fallback) so the avatar is stable across reloads.
  *
+ * When there is no name to derive initials from, the avatar shows a centered
+ * hyphen bar — an intentional "not set" placeholder rather than a stray letter.
+ *
  * No network calls, no file uploads — just an inline SVG string.
  */
 export function generateAvatarDataUrl({ name, phone } = {}) {
-  const initials = getInitials(name) || "U";
+  const initials = getInitials(name);
   const palette = [
     "#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#a855f7",
     "#ec4899", "#06b6d4", "#64748b", "#84cc16", "#f97316",
@@ -50,12 +54,17 @@ export function generateAvatarDataUrl({ name, phone } = {}) {
   const color = palette[h % palette.length];
 
   // 96×96 is plenty for a 32–40px chip; bigger numbers just bloat the data URL.
+  // The hyphen is drawn as a rounded bar (not a text glyph) so it stays
+  // optically centered regardless of the viewer's font metrics.
+  const glyph = initials
+    ? `<text x="50%" y="50%" text-anchor="middle" dy=".35em" ` +
+      `font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" ` +
+      `font-size="42" font-weight="600" fill="#ffffff">${escapeAttr(initials)}</text>`
+    : `<rect x="30" y="45" width="36" height="6" rx="3" fill="#ffffff"/>`;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">` +
     `<rect width="96" height="96" rx="48" fill="${escapeAttr(color)}"/>` +
-    `<text x="50%" y="50%" text-anchor="middle" dy=".35em" ` +
-    `font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" ` +
-    `font-size="42" font-weight="600" fill="#ffffff">${escapeAttr(initials)}</text>` +
+    glyph +
     `</svg>`;
   return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
@@ -1068,8 +1077,11 @@ export function generateHeroAvatarDataUrl(id) {
 export function processProfilePicture(file, { maxSide = 256, maxBytes = 8 * 1024 * 1024 } = {}) {
   return new Promise((resolve) => {
     if (!file) return resolve({ ok: false, error: "No file selected." });
-    if (!/^image\//.test(file.type || "")) {
-      return resolve({ ok: false, error: "Please choose an image file (PNG, JPEG, GIF, or WebP)." });
+    // Only JPG / JPEG, PNG, and WebP are supported. Anything else
+    // (GIF, BMP, SVG, AVIF, HEIC, …) is rejected up front so the
+    // caller can surface a clear "not supported" message.
+    if (!/^image\/(jpe?g|png|webp)$/i.test(file.type || "")) {
+      return resolve({ ok: false, error: "This file format is not supported" });
     }
     if (typeof file.size === "number" && file.size > maxBytes) {
       const mb = (maxBytes / (1024 * 1024)).toFixed(0);
@@ -1489,23 +1501,11 @@ export const KEYWORD_CATEGORIES = [
  * Look up the best matching category for a free-text note.
  * Returns { id, word } if a match is found, or null otherwise.
  */
-export function suggestCategory(text) {
-  const t = (text || "").toLowerCase().trim();
-  if (!t) return null;
-  // 1) Whole-word match (most precise).
-  for (const entry of KEYWORD_CATEGORIES) {
-    for (const w of entry.words) {
-      const re = new RegExp(`\\b${escapeRegex(w)}\\b`, "i");
-      if (re.test(t)) return { id: entry.id, word: w };
-    }
-  }
-  // 2) Substring fallback for short words (e.g. "ola" inside "Ola cab").
-  for (const entry of KEYWORD_CATEGORIES) {
-    for (const w of entry.words) {
-      if (w.length >= 4 && t.includes(w)) return { id: entry.id, word: w };
-    }
-  }
-  return null;
+export function suggestCategory(text, ctx) {
+  // The shared classifier (js/categorize.js) understands far more products
+  // than the keyword map above and tolerates typos; the map is kept for
+  // callers that import it.
+  return suggestCategoryFromText(text, ctx || {});
 }
 
 function escapeRegex(s) {

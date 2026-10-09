@@ -14,7 +14,7 @@
 // wrap). Losing the phrase doesn't compromise the account — losing
 // the password + all devices does.
 
-import { randomBytes, sha256 } from "./sodium.mjs";
+import { randomBytes, sha256 } from "./sodium.mjs?v=31";
 
 // Compact 256-word list. Each word is short, common, and easy to
 // spell. Curated to avoid homophones (to/few/too) and words with

@@ -19,14 +19,15 @@
 // so changing the currency in Settings updates every KPI / chip / value
 // without touching the view.
 
-import { Store } from "../store.js";
-import { formatCurrency, formatDate } from "../format.js";
-import { isSupported as voiceSupported, startListening as startVoice } from "../voice.js";
-import { toast } from "../components/toast.js";
-import { buildProgressBar } from "../components/progress.js";
-import { renderBarChart } from "../components/chart.js";
-import { confirmDialog } from "../components/confirm.js";
-import { parseQuickAdd, escapeHtml, paymentMethodLabel, upiAppLabel, suggestCategory, todayISO, currentTimeHHMM, monthKey, formatMonth, UPI_APPS } from "../util.js";
+import { Store } from "../store.js?v=31";
+import { formatCurrency, formatDate, symbolForSettings } from "../format.js?v=31";
+import { isSupported as voiceSupported, startListening as startVoice } from "../voice.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { buildProgressBar } from "../components/progress.js?v=31";
+import { renderBarChart } from "../components/chart.js?v=31";
+import { confirmDialog } from "../components/confirm.js?v=31";
+import { classifyText } from "../categorize.js?v=31";
+import { parseQuickAdd, escapeHtml, paymentMethodLabel, upiAppLabel, todayISO, currentTimeHHMM, monthKey, formatMonth, UPI_APPS } from "../util.js?v=31";
 
 // `syncToServer` is exposed on window by main.js so views can kick the
 // server-side mirror immediately after a mutation. We grab it lazily
@@ -102,7 +103,12 @@ export function renderDashboard(container, ctx) {
     <div class="kpi-grid" id="kpi-grid"></div>
 
     <!-- Quick Add: one-line entry, e.g. "Coffee 180" -->
-    <div class="dash-card" style="margin-bottom: var(--space-4)">
+        <!-- The card carries the no-blur modifier: Chrome renders native
+             <select> dropdowns incorrectly inside backdrop-filter containers
+             (the popup list detaches / both dropdowns appear open after
+             scrolling). The glass background stays — only the blur is removed
+             so the selects behave natively. -->
+        <div class="dash-card dash-card--no-blur" style="margin-bottom: var(--space-4)">
       <div class="dash-card__title">
         QUICK ADD
         <span class="dash-card__hint">Type a note and amount, e.g. <code>Coffee 180</code></span>
@@ -206,7 +212,7 @@ export function renderDashboard(container, ctx) {
   // --- Breakdown chart ---------------------------------------------------
   renderBarChart(wrap.querySelector("#breakdown-chart"), {
     data: breakdown,
-    valuePrefix: settings.currencySymbol,
+    valuePrefix: symbolForSettings(settings),
     emptyText: "No expenses this month yet.",
   });
 
@@ -457,7 +463,7 @@ function renderKpiGrid({ thisTotal, thisCount, lastTotal, lastCount, session, se
     </div>
     <div class="kpi">
       <div class="kpi__label">vs. last month</div>
-      <div class="kpi__value" style="font-size: var(--text-md)">${formatCurrency(lastTotal, settings)}</div>
+      <div class="kpi__value">${formatCurrency(lastTotal, settings)}</div>
       ${deltaHtml}
     </div>
     <div class="kpi">
@@ -572,6 +578,7 @@ function mountQuickAdd(wrap, ctx) {
 
   function refreshCategoryOptions() {
     if (!catSelect) return;
+    const keep = catSelect.value;
     catSelect.innerHTML = "";
     for (const c of ctx.state.categories) {
       const opt = document.createElement("option");
@@ -579,8 +586,32 @@ function mountQuickAdd(wrap, ctx) {
       opt.textContent = c.icon ? c.icon + "  " + c.name : c.name;
       catSelect.appendChild(opt);
     }
+    if (keep && ctx.state.categories.some((c) => c.id === keep)) catSelect.value = keep;
   }
   refreshCategoryOptions();
+
+  // The category follows what the user types or says until they pick one
+  // themselves. (Previously the select always held the FIRST category, which
+  // then won over the keyword suggestion — so nothing was ever auto-picked.)
+  let categoryTouched = false;
+  const liveCtxState = () => ((typeof ctx.getState === "function") ? ctx.getState() : ctx.state);
+  const textForCategory = () => (noteInput?.value || "").trim() || parseQuickAdd(input.value).note;
+  function classifyEntry(text) {
+    const st = liveCtxState();
+    return classifyText(text, { categories: st.categories, expenses: st.expenses, fallbackOther: true });
+  }
+  function autoSelectCategory() {
+    if (categoryTouched || !catSelect) return;
+    const text = textForCategory();
+    if (!text) return;
+    const match = classifyEntry(text);
+    if (match && catSelect.value !== match.categoryId) catSelect.value = match.categoryId;
+  }
+  catSelect?.addEventListener("change", () => { categoryTouched = true; });
+  noteInput?.addEventListener("input", () => {
+    autoSelectCategory();
+    input.dispatchEvent(new Event("input", { bubbles: true })); // refresh the preview chip
+  });
 
   function syncPayFields() {
     if (!paySelect) return;
@@ -611,6 +642,7 @@ function mountQuickAdd(wrap, ctx) {
       const resetLabel = () => { micBtn.classList.remove("is-listening"); micBtn.innerHTML = originalLabel; };
       voiceActive = startVoice({
         categories: ctx.state.categories,
+        expenses: ctx.state.expenses,
         onTick: (remainingMs) => {
           const s = Math.ceil(remainingMs / 1000);
           micBtn.innerHTML = `<span aria-hidden="true">🎙️</span> ${s}s`;
@@ -637,7 +669,7 @@ function mountQuickAdd(wrap, ctx) {
           }
           if (micStatus) {
             const bits = [];
-            if (r.amount != null) bits.push(`₹${r.amount}`);
+            if (r.amount != null) bits.push(`${symbolForSettings(ctx.state.settings)}${r.amount}`);
             if (r.note) bits.push(`"${r.note}"`);
             if (r.paymentMethod && r.paymentMethod !== "cash") bits.push(r.paymentMethod.replace("_", " "));
             if (r.upiApp) bits.push(r.upiApp);
@@ -676,8 +708,9 @@ function mountQuickAdd(wrap, ctx) {
     const { amount, note } = parseQuickAdd(raw);
     const settings = ctx.state.settings;
     const catById = new Map(ctx.state.categories.map((c) => [c.id, c]));
-    const sugMatch = suggestCategory(note);
-    const sug = sugMatch ? catById.get(sugMatch.id) : null;
+    autoSelectCategory();
+    // Show the category that will be saved (the select, once auto-filled).
+    const sug = catSelect && catSelect.value ? catById.get(catSelect.value) : null;
     const sugChip = sug
       ? `<span class="cat-chip"><span class="cat-swatch" style="background:${sug.color}"></span>${sug.icon ? `<span class="cat-icon" aria-hidden="true">${escapeHtml(sug.icon)}</span>` : ""}${escapeHtml(sug.name)}</span>`
       : "";
@@ -727,14 +760,16 @@ function mountQuickAdd(wrap, ctx) {
     if (amount == null) {
       const ok = await confirmDialog({
         title: "No amount detected",
-        message: `"${raw}" doesn't contain a number. Add it anyway with ${settings.currencySymbol}0?`,
+        message: `"${raw}" doesn't contain a number. Add it anyway with ${symbolForSettings(settings)}0?`,
         confirmLabel: "Add anyway",
         cancelLabel: "Keep editing",
       });
       if (!ok) return;
     }
 
-    const sug = suggestCategory(finalNote);
+    // Not chosen by hand → classify the final note now (covers a fast Add
+    // click before the last keystroke's auto-select ran).
+    const auto = !categoryTouched ? classifyEntry(finalNote) : null;
     const fallbackId = liveState.categories[0]?.id || "";
     const paymentMethod = (paySelect && paySelect.value) || "cash";
     const upiApp = (upiSelect && paymentMethod === "upi") ? upiSelect.value : "";
@@ -743,7 +778,9 @@ function mountQuickAdd(wrap, ctx) {
       amount: amount != null ? amount : 0,
       date: todayISO(),
       time: currentTimeHHMM(),
-      categoryId: explicitCat || (sug && sug.id) || fallbackId,
+      categoryId: categoryTouched
+        ? (explicitCat || fallbackId)
+        : ((auto && auto.categoryId) || explicitCat || fallbackId),
       note: finalNote,
       paymentMethod,
       upiApp,
@@ -775,6 +812,8 @@ function mountQuickAdd(wrap, ctx) {
     input.value = "";
     if (noteInput) noteInput.value = "";
     preview.innerHTML = "";
+    categoryTouched = false;
+    if (catSelect && catSelect.options.length) catSelect.selectedIndex = 0;
 
     const noteTail = explicitNote ? ` · "${explicitNote}"` : "";
     const greeting = wasFirst ? "🎉 First expense logged — nice!" : "Added";

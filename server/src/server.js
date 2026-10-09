@@ -72,6 +72,16 @@ export function buildApp() {
 
   app.use(cookieParser(JWT_SECRET));
 
+  // API responses are per-user and must never come from a browser or CDN
+  // cache (a stale whoami / vault revision caused phantom conflicts and
+  // stale data). Also drop ETags so nothing is revalidated against old state.
+  app.set("etag", false);
+  app.use("/api", (_req, res, next) => {
+    res.set("Cache-Control", "no-store, max-age=0");
+    res.set("Pragma", "no-cache");
+    next();
+  });
+
   // CORS: allow the static client served from any origin during dev. In
   // production you'd tighten this to a known origin list. When
   // CLIENT_ORIGIN is set (e.g. the Cloudflare Pages URL), we reflect that

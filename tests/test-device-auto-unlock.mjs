@@ -56,24 +56,26 @@ check("device-wrap envelope includes deviceId",
 console.log("\n[2] device-key module persists per-user key in IndexedDB");
 check("device-key module declares DB_NAME + STORE",
   /DB_NAME\s*=\s*["']xpensic["']/.test(deviceKey) && /STORE\s*=\s*["']device_keys["']/.test(deviceKey));
-check("device-key module uses indexedDB",
-  /indexedDB\.open/.test(deviceKey));
+// The raw IndexedDB calls now live in the shared defensive wrapper (idb.mjs),
+// which device-key.mjs builds its store on.
+const idbWrapper = read("js/crypto/idb.mjs");
+check("device-key module uses indexedDB (via the shared wrapper)",
+  /createIdb/.test(deviceKey) && /indexedDB\.open/.test(idbWrapper));
 check("device-key module exports getDeviceKey / setDeviceKey / clearDeviceKey / newDeviceKey",
   /export\s+(?:async\s+)?function\s+getDeviceKey/.test(deviceKey) &&
   /export\s+(?:async\s+)?function\s+setDeviceKey/.test(deviceKey) &&
   /export\s+(?:async\s+)?function\s+clearDeviceKey/.test(deviceKey) &&
   /export\s+function\s+newDeviceKey/.test(deviceKey));
 check("device-key module degrades gracefully when IndexedDB is unavailable",
-  /indexedDB\s*===\s*["']undefined["']/.test(deviceKey) || /typeof\s+indexedDB\s*===\s*["']undefined["']/.test(deviceKey) ||
-  /typeof\s+indexedDB/.test(deviceKey));
+  /typeof\s+indexedDB\s*===\s*["']undefined["']/.test(idbWrapper));
 
 // ---- Section 3: main.js wires the silent auto-unlock path ----
 
 console.log("\n[3] main.js wires the silent auto-unlock path");
 check("main.js imports the device-key helpers",
-  /from\s+["']\.\/crypto\/device-key\.mjs["']/.test(main));
+  /from\s+["']\.\/crypto\/device-key\.mjs(?:\?[^"']*)?["']/.test(main));
 check("main.js imports the device-wrap helpers from keystore",
-  /from\s+["']\.\/crypto\/keystore\.mjs["']/.test(main));
+  /from\s+["']\.\/crypto\/keystore\.mjs(?:\?[^"']*)?["']/.test(main));
 check("main.js defines tryDeviceAutoUnlock",
   /async\s+function\s+tryDeviceAutoUnlock/.test(main));
 check("main.js calls tryDeviceAutoUnlock before mountUnlock",

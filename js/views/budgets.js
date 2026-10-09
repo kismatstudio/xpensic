@@ -15,12 +15,12 @@
 // Amounts of 0 / empty / NaN are stored as "no budget" (the row is hidden
 // from the totals). The store handles this via Store.setBudget().
 
-import { Store } from "../store.js";
-import { formatCurrency } from "../format.js";
-import { buildProgressBar } from "../components/progress.js";
-import { toast } from "../components/toast.js";
-import { escapeHtml, startOfMonth, monthKey, formatMonth } from "../util.js";
-import { computeBudgetTips, TIP_KIND_ICON } from "../budget-tips.js";
+import { Store } from "../store.js?v=31";
+import { formatCurrency, symbolForSettings } from "../format.js?v=31";
+import { buildProgressBar } from "../components/progress.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { escapeHtml, startOfMonth, monthKey, formatMonth } from "../util.js?v=31";
+import { computeBudgetTips, TIP_KIND_ICON } from "../budget-tips.js?v=31";
 
 /**
  * Renders the Budgets view.
@@ -256,7 +256,7 @@ function renderRow({ cat, budget, spent, settings }) {
           Monthly budget
         </label>
         <div class="budget-list__editor-row">
-          <span class="budget-list__editor-prefix" aria-hidden="true">${escapeHtml(settings.currencySymbol || "₹")}</span>
+          <span class="budget-list__editor-prefix" aria-hidden="true">${escapeHtml(symbolForSettings(settings))}</span>
           <input
             type="number" min="0" step="50" inputmode="decimal"
             class="field__input budget-list__input"

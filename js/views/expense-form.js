@@ -10,25 +10,33 @@ import {
   validateTime,
   validatePaymentMethod,
   validateUpiApp,
-} from "../validators.js";
+} from "../validators.js?v=31";
 import {
   todayISO,
   currentTimeHHMM,
   escapeHtml,
   PAYMENT_METHODS,
   UPI_APPS,
-  suggestCategory,
-} from "../util.js";
-import { isSupported as voiceSupported, startListening } from "../voice.js";
+} from "../util.js?v=31";
+import { classifyText } from "../categorize.js?v=31";
+import { isSupported as voiceSupported, startListening } from "../voice.js?v=31";
+import { symbolForSettings } from "../format.js?v=31";
+import {
+  readReceiptFile, isEmptyScan, buildScanSummary, resolveCategoryId,
+} from "../receipt-scan.js?v=31";
 
 /**
  * @param {object} ctx
  * @param {Array}  ctx.categories  — all categories from the store
  * @param {object} [ctx.expense]   — when provided, the form starts in edit mode
+ * @param {object} [ctx.settings]  — settings, used for currency-aware labels
  * @returns {HTMLFormElement}
  */
-export function buildExpenseForm({ categories, expense }) {
+export function buildExpenseForm({ categories, expense, settings, expenses }) {
   const isEdit = Boolean(expense);
+  // The category follows what the user types / says / scans until they pick
+  // one themselves. Editing an existing expense never auto-changes it.
+  let categoryTouched = isEdit;
 
   // Build a <form> imperatively so we can attach clean change/input handlers
   // and clear validation errors as the user types.
@@ -49,6 +57,41 @@ export function buildExpenseForm({ categories, expense }) {
     autocomplete: "off",
   });
   form.appendChild(amountGroup.root);
+
+    // Tracks whether the user typed a non-numeric character into the
+      // amount field. <input type="number"> swallows those keystrokes, so
+      // the value stays empty — but we still need to tell the user their
+      // input was rejected when they hit Add.
+      let amountHadInvalidChars = false;
+
+      // Live guard: <input type="number"> silently swallows non-numeric
+      // keystrokes, so the user gets no feedback when they type letters.
+      // `beforeinput` fires before the edit is applied — if the incoming
+      // text contains anything that isn't a digit, decimal point, or minus
+      // sign, surface the error immediately instead of letting it vanish.
+      amountGroup.input.addEventListener("beforeinput", (e) => {
+        const incoming = e.data || "";
+        if (!incoming) return; // deletions / formatting edits are fine
+        if (/[^0-9.,-]/.test(incoming)) {
+          amountHadInvalidChars = true;
+          setFieldError("amount", "Characters are not allowed in amount field");
+        }
+      });
+
+      // Clear the invalid-chars flag as soon as the user types a valid
+      // character or clears the field, so a later submit reports the
+      // correct error ("required" for empty, not "characters not allowed").
+      amountGroup.input.addEventListener("input", () => {
+        amountHadInvalidChars = false;
+      });
+
+      // The spinner is hidden via CSS, but the mouse wheel would still
+      // increment/decrement the value. Block wheel events on the amount
+      // field so scrolling over it never changes the number — the user
+      // must type the amount by hand.
+      amountGroup.input.addEventListener("wheel", (e) => {
+        e.preventDefault();
+      }, { passive: false });
 
   // --- Speak Expense (top-right corner) -----------------------------------
   // Rendered as a small floating button in the top-right of the form so it
@@ -89,6 +132,7 @@ export function buildExpenseForm({ categories, expense }) {
       active = startListening({
         // Pass the category list so parseVoiceCommand can pick the right one.
         categories,
+        expenses,
         onInterim: (t) => { statusEl.textContent = `Hearing: "${t}"`; },
         onTick: (remainingMs) => {
           // Update the button label with a countdown so the user knows
@@ -125,7 +169,7 @@ export function buildExpenseForm({ categories, expense }) {
           // Trigger the category suggestion pill refresh.
           updateSuggestion();
           const parts = [];
-          if (r.amount != null) parts.push(`₹${r.amount}`);
+          if (r.amount != null) parts.push(`${symbolForSettings(settings)}${r.amount}`);
           if (r.note) parts.push(`"${r.note}"`);
           if (r.paymentMethod && r.paymentMethod !== "cash") parts.push(r.paymentMethod.replace("_", " "));
           if (r.upiApp) parts.push(r.upiApp);
@@ -184,8 +228,18 @@ export function buildExpenseForm({ categories, expense }) {
     });
   }
   const catErr = makeErrorEl("categoryId");
-  catField.append(catSelect, catErr);
+  // Small line under the select explaining an automatic choice.
+  const catHint = document.createElement("div");
+  catHint.className = "field__hint muted cat-auto-hint";
+  catHint.hidden = true;
+  catField.append(catSelect, catHint, catErr);
   form.appendChild(catField);
+  // A change the USER makes (programmatic assignments don't fire "change")
+  // stops the automatic selection.
+  catSelect.addEventListener("change", () => {
+    categoryTouched = true;
+    catHint.hidden = true;
+  });
 
   // --- Payment method -----------------------------------------------------
   // Required. Drives whether the UPI app dropdown below is shown.
@@ -280,12 +334,109 @@ export function buildExpenseForm({ categories, expense }) {
     </p>
   `;
   const receiptFileState = { file: null, existingBlobId: expense?.receiptBlobId || null };
+  const receiptHint = receiptField.querySelector(".receipt-hint");
+  const HINT_DEFAULT = "Choose a photo of the bill and we'll read it and fill in the amount, category and date for you. Read on this device — nothing is uploaded.";
+  receiptHint.textContent = HINT_DEFAULT;
+  // Where the scan progress / "what we found" panel appears.
+  const scanBox = document.createElement("div");
+  scanBox.className = "scan receipt-scan";
+  scanBox.hidden = true;
+  receiptField.appendChild(scanBox);
+  let receiptScanId = 0;
+
+  /** Fills the form from a scan result. The Note is never touched. */
+  function applyScan(r) {
+    if (r.total != null) {
+      amountGroup.input.value = String(r.total);
+      amountGroup.input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    const catId = resolveCategoryId(r.categoryId, categories);
+    if (catId) {
+      catSelect.value = catId;
+      // The bill's products decided it — keep it even if a Note is typed later.
+      categoryTouched = true;
+      catHint.hidden = true;
+    }
+    if (r.payment.paymentMethod) {
+      paySelect.value = r.payment.paymentMethod;
+      paySelect.dispatchEvent(new Event("change", { bubbles: true }));
+      if (r.payment.upiApp) upiSelect.value = r.payment.upiApp;
+    }
+    if (r.date || r.time) {
+      const [curDate, curTime] = (dateTimeGroup.input.value || combineDateTime()).split("T");
+      dateTimeGroup.input.value = `${r.date || curDate}T${(r.time || curTime || currentTimeHHMM()).slice(0, 5)}`;
+      dateTimeGroup.input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    updateSuggestion();
+  }
+
+  async function scanReceipt(file) {
+    const myScan = ++receiptScanId;
+    const isCancelled = () => myScan !== receiptScanId || !receiptField.isConnected;
+    scanBox.hidden = false;
+    scanBox.innerHTML = `
+      <div class="scan__status" aria-live="polite">Reading the bill…</div>
+      <div class="scan__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+      <p class="scan__hint">The first scan downloads the reader (about 10 MB) and can take a little longer.</p>`;
+    const statusEl = scanBox.querySelector(".scan__status");
+    const barEl = scanBox.querySelector(".scan__bar span");
+    const barWrap = scanBox.querySelector(".scan__bar");
+    const showError = (msg) => {
+      scanBox.innerHTML = "";
+      const e = document.createElement("div");
+      e.className = "scan__error";
+      e.setAttribute("role", "alert");
+      e.textContent = msg;
+      scanBox.appendChild(e);
+    };
+    let scanned;
+    try {
+      scanned = await readReceiptFile(file, (p, text) => {
+        if (isCancelled()) return;
+        const pct = Math.round(Math.max(0, Math.min(1, p)) * 100);
+        barEl.style.width = pct + "%";
+        barWrap.setAttribute("aria-valuenow", String(pct));
+        if (text) statusEl.textContent = text;
+      }, isCancelled, { categories, expenses });
+    } catch (err) {
+      if (!isCancelled()) showError(err.message + " You can still fill the form in by hand.");
+      return;
+    }
+    if (isCancelled() || !scanned) return;
+    if (isEmptyScan(scanned.result)) {
+      showError("We couldn't read any text on this image. Make sure the bill is flat, well lit and fills the frame — or fill the form in by hand.");
+      return;
+    }
+    applyScan(scanned.result);
+    scanBox.innerHTML = "";
+    scanBox.append(buildScanSummary({
+      result: scanned.result,
+      thumb: scanned.thumb,
+      settings,
+      categories,
+      onPickAmount: (amount) => {
+        amountGroup.input.value = String(amount);
+        amountGroup.input.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+    }));
+    const applied = document.createElement("p");
+    applied.className = "scan__hint";
+    applied.textContent = "Amount, category and date were filled in from the bill — check them, then add an optional Note.";
+    scanBox.appendChild(applied);
+  }
+
   receiptField.querySelector("#exp-receipt").addEventListener("change", (e) => {
     const f = e.target.files && e.target.files[0];
     receiptFileState.file = f || null;
-    const hint = receiptField.querySelector(".receipt-hint");
-    if (f) hint.textContent = `Ready to encrypt: ${f.name} (${(f.size / 1024).toFixed(0)} KB)`;
-    else hint.textContent = "Encrypted on this device before upload. Max 10 MB.";
+    if (!f) {
+      receiptScanId++;
+      scanBox.hidden = true;
+      scanBox.innerHTML = "";
+      receiptHint.textContent = HINT_DEFAULT;
+      return;
+    }
+    receiptHint.textContent = `Selected: ${f.name} (${(f.size / 1024).toFixed(0)} KB)`;
+    scanReceipt(f);
   });
   form.appendChild(receiptField);
 
@@ -356,38 +507,26 @@ export function buildExpenseForm({ categories, expense }) {
   noteGroup.root.appendChild(suggestPill);
 
   /**
-   * Re-evaluate the suggestion. Called on every input event in the note
-   * field. Resolves a category id (if any), updates the pill text, and
-   * shows/hides the pill. Does NOT auto-apply the category — the user
-   * must click "Use" to keep the choice transparent and reversible.
+   * Picks the category from the Note as the user types (or speaks): the
+   * product is analysed by the shared classifier (js/categorize.js) using
+   * their past expenses, their own category names and a large product
+   * vocabulary. Stops as soon as the user chooses a category themselves.
    */
-  function updateSuggestion() {
+  function autoSelectCategory() {
+    if (categoryTouched) return;
     const text = noteGroup.input.value;
-    // Don't suggest if the user already picked a category.
-    if (catSelect.value) {
-      suggestPill.style.display = "none";
-      return;
-    }
-    const match = suggestCategory(text);
-    if (!match) {
-      suggestPill.style.display = "none";
-      return;
-    }
-    const cat = categories.find((c) => c.id === match.id);
-    if (!cat) {
-      suggestPill.style.display = "none";
-      return;
-    }
-    suggestPill.querySelector("[data-suggest-label]").textContent = cat.name;
-    suggestPill.style.display = "";
+    if (!text.trim()) { catHint.hidden = true; return; }
+    const match = classifyText(text, { categories, expenses, fallbackOther: true });
+    if (!match) { catHint.hidden = true; return; }
+    if (catSelect.value !== match.categoryId) catSelect.value = match.categoryId;
+    catHint.textContent = match.source === "fallback"
+      ? "✨ We couldn't tell the category from this note — please check it."
+      : `✨ Category chosen automatically from "${text.trim().slice(0, 40)}" — change it if it's not right.`;
+    catHint.hidden = false;
   }
-  // Wire the suggest button. We capture `match` lazily in the handler so
-  // the click always reflects the latest keyword hit.
-  suggestPill.querySelector(".suggest-pill__btn").addEventListener("click", () => {
-    const match = suggestCategory(noteGroup.input.value);
-    if (match) catSelect.value = match.id;
-    suggestPill.style.display = "none";
-  });
+  // Kept under its old name: voice entry and the initial pass call it.
+  const updateSuggestion = autoSelectCategory;
+  suggestPill.style.display = "none"; // the old "Use" pill is replaced by auto-selection
   noteGroup.input.addEventListener("input", updateSuggestion);
   // Initial pass so a pre-filled note (in edit mode) shows its suggestion.
   updateSuggestion();
@@ -426,8 +565,19 @@ export function buildExpenseForm({ categories, expense }) {
     };
     const errors = {};
     const amt = validateAmount(data.amount);
-    if (!amt.ok) { errors.amount = amt.error; amountGroup.showError(amt.error); }
-    else setFieldError("amount", "");
+        if (!amt.ok) {
+          // If the user typed characters that the number input swallowed,
+          // surface the specific "characters not allowed" message instead
+          // of the generic "required" one.
+          if (amountHadInvalidChars) {
+            errors.amount = "Characters are not allowed in amount field";
+            amountGroup.showError(errors.amount);
+          } else {
+            errors.amount = amt.error;
+            amountGroup.showError(amt.error);
+          }
+        }
+        else setFieldError("amount", "");
     const dat = validateDate(data.date);
     if (!dat.ok) { errors.date = dat.error; dateGroup.showError(dat.error); }
     else setFieldError("date", "");

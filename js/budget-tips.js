@@ -12,7 +12,21 @@
 // the main list. They re-compute on every render, so they're always
 // up-to-date with the latest expense / budget state.
 
+import { symbolForSettings } from "./format.js?v=31";
+
 const DAY_MS = 86_400_000;
+
+// Currency-aware formatter for tip text. Accepts the full settings object so
+// the symbol follows the selected currency code (and the before/after
+// position) instead of being hard-coded to "₹".
+function makeCurrencyFormatter(settings = {}) {
+  const symbol = symbolForSettings(settings);
+  const after = settings.currencyPosition === "after";
+  return (n) => {
+    const v = Math.round(Number(n) || 0).toLocaleString("en-IN");
+    return after ? `${v} ${symbol}` : `${symbol}${v}`;
+  };
+}
 
 function inMonth(date, year, month /* 0-based */) {
   const d = new Date(date);
@@ -55,6 +69,7 @@ export function computeBudgetTips(state, ctx = {}) {
   const categories = state.categories || [];
   const expenses = state.expenses || [];
   const monthly = state.budgets?.monthly?.[monthKey] || {};
+  const cur = makeCurrencyFormatter(state.settings);
 
   // --- Rule 1: over-budget categories get a "reduce by X%" suggestion ---
   for (const cat of categories) {
@@ -70,9 +85,9 @@ export function computeBudgetTips(state, ctx = {}) {
         kind: "warning",
         title: `${cat.name} is over budget`,
         body:
-          `You've spent ${fmt(spent)} against a budget of ${fmt(budget)} ` +
-          `(over by ${fmt(overshoot)}). Cutting ${cat.name} by ${cutBy}% would ` +
-          `save roughly ${fmt(spent - targetSpend)} this month.`,
+          `You've spent ${cur(spent)} against a budget of ${cur(budget)} ` +
+          `(over by ${cur(overshoot)}). Cutting ${cat.name} by ${cutBy}% would ` +
+          `save roughly ${cur(spent - targetSpend)} this month.`,
       });
     }
   }
@@ -93,11 +108,11 @@ export function computeBudgetTips(state, ctx = {}) {
     tips.push({
       id: `reduce-${cat.id}`,
       kind: "saving",
-      title: `Save ~${fmt(saved)}/month`,
+      title: `Save ~${cur(saved)}/month`,
       body:
         `If you cut ${cat.name} by ${reduceBy}%, you'd save about ` +
-        `${fmt(saved)} per month — ${fmt(saved * 12)} per year. ` +
-        `Current pace: ${fmt(spent)} / ${fmt(budget)} budget.`,
+        `${cur(saved)} per month — ${cur(saved * 12)} per year. ` +
+        `Current pace: ${cur(spent)} / ${cur(budget)} budget.`,
     });
   }
 
@@ -137,7 +152,7 @@ export function computeBudgetTips(state, ctx = {}) {
       title: `Set a ${cat.name} budget`,
       body:
         `${cat.name} is one of your top categories this month ` +
-        `(${fmt(spent)}). Try setting a budget to track it explicitly.`,
+        `(${cur(spent)}). Try setting a budget to track it explicitly.`,
       action: { kind: "go-budgets", catId: cat.id },
     });
   }
@@ -170,14 +185,6 @@ export function computeBudgetTips(state, ctx = {}) {
 
   // Cap to 6 tips — too many is worse than too few.
   return tips.slice(0, 6);
-}
-
-function fmt(n) {
-  // Lightweight formatter: round to integer and add thousands separator.
-  // The view's formatCurrency handles the actual symbol/position, but
-  // for tip body text we just want a readable number.
-  const v = Math.round(Number(n) || 0);
-  return "₹" + v.toLocaleString("en-IN");
 }
 
 /**

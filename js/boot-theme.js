@@ -1,11 +1,11 @@
 // Runs synchronously in <head> before styles paint, to avoid a light/dark flash.
 //
-// Default theme is now "dark" (the brief specifies a dark modern theme
-// for Xpensic). Users can still switch to light or system via the
-// theme toggle; the pref is persisted in localStorage.
+// Default theme is "system". The pref in localStorage is reset to "system"
+// whenever the login gate is showing, and holds the signed-in user's
+// choice otherwise (see theme.js).
 (function () {
   try {
-    var pref = localStorage.getItem("expense-tracker:theme-pref") || "dark";
+    var pref = localStorage.getItem("expense-tracker:theme-pref") || "system";
     var resolved = pref;
     if (pref === "system") {
       resolved = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches

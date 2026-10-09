@@ -9,7 +9,7 @@
 // or replace. We never write directly to localStorage here — keep side
 // effects in the caller (main.js / settings view).
 
-import { migrate, validate, normalizeExpense } from "./store.js";
+import { migrate, validate, normalizeExpense } from "./store.js?v=31";
 
 export function exportFullState(state) {
   // Stringify with 2-space indent so the file is human-readable and

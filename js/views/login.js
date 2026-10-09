@@ -15,11 +15,11 @@
 // user can't see the app shell behind it. A modal-style backdrop is
 // enough.
 
-import { generateAvatarDataUrl, escapeHtml } from "../util.js";
-import { Auth, apiBase } from "../api.js";
-import { toast } from "../components/toast.js";
-import { openModal } from "../components/modal.js";
-import { enhancePasswordInputs } from "../components/pw-toggle.js";
+import { generateAvatarDataUrl, escapeHtml } from "../util.js?v=31";
+import { Auth, apiBase } from "../api.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { openModal } from "../components/modal.js?v=31";
+import { enhancePasswordInputs } from "../components/pw-toggle.js?v=31";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[0-9]{10}$/;
@@ -534,8 +534,9 @@ export function mountLogin({ onComplete }) {
     // Fresh sign-ups have no display name yet (the user can set one
     // later in Profile); fall back to the first letter of the email
     // (or the first digit of the phone) so the initials avatar still
-    // shows something sensible.
-    const fallbackName = user.displayName || user.email || user.phone || "U";
+    // shows something sensible. With neither, the avatar renders the
+    // hyphen placeholder.
+    const fallbackName = user.displayName || user.email || user.phone || "";
     const avatarDataUrl = generateAvatarDataUrl({
       name: fallbackName,
       phone: user.phone || user.email || "",
