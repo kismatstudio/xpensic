@@ -1,4 +1,4 @@
-﻿// Keystore â€” wraps the user's master key (MK) with a password so it
+// Keystore â€” wraps the user's master key (MK) with a password so it
 // can be stored on the server. Each user account has zero or more
 // wraps; the password is the most common wrap type, but a device
 // (via key exchange) or a recovery phrase can also wrap the MK.
@@ -26,7 +26,7 @@ import {
   deriveKeyFromPassword,
   newSalt,
   authTag,
-} from "./sodium.mjs";
+} from "./sodium.mjs?v=31";
 
 const PHRASE_KDF = { name: "pbkdf2-sha256", iters: 200_000 };
 

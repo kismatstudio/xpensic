@@ -1,6 +1,6 @@
 // Small, framework-free validators. Each returns { ok: boolean, value?, error? }.
 
-import { PAYMENT_METHODS, UPI_APPS } from "./util.js";
+import { PAYMENT_METHODS, UPI_APPS } from "./util.js?v=31";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM     = /^([01]\d|2[0-3]):[0-5]\d$/;

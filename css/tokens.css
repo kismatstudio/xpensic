@@ -9,35 +9,38 @@
 /* ─── Default (dark) theme ────────────────────────────────────────────── */
 :root {
   /* Color — surfaces (deep, layered glass-friendly) */
-  --color-bg:            #0F172A;   /* page background */
-  --color-bg-deep:       #0B1224;   /* deepest layer (behind blobs) */
-  --color-surface:       #1E293B;   /* default surface */
-  --color-surface-2:     #25324A;   /* slightly elevated surface */
-  --color-surface-3:     #2D3A55;   /* inputs / wells */
-  --color-border:        rgba(255, 255, 255, 0.08);
-  --color-border-strong: rgba(255, 255, 255, 0.16);
+  /* Neutral black palette — true-black base with stepped greys so cards,
+     inputs and menus separate clearly without any blue cast. */
+  --color-bg:            #050505;   /* page background */
+  --color-bg-deep:       #000000;   /* deepest layer (behind blobs) */
+  --color-surface:       #121212;   /* default surface */
+  --color-surface-2:     #1A1A1A;   /* slightly elevated surface */
+  --color-surface-3:     #242424;   /* inputs / wells */
+  --color-border:        rgba(255, 255, 255, 0.12);
+  --color-border-strong: rgba(255, 255, 255, 0.22);
 
   /* Color — text */
   --color-text:          #FFFFFF;
   --color-text-strong:   #FFFFFF;
-  --color-text-muted:    #CBD5E1;
-  --color-text-faint:    #94A3B8;
-  --color-text-inverse:  #0F172A;
+  --color-text-muted:    #D4D4D8;
+  --color-text-faint:    #A1A1AA;
+  --color-text-inverse:  #050505;
 
   /* Color — brand & status (the brief's palette) */
   --color-primary:       #6366F1;   /* indigo-500 */
-  --color-primary-hover: #818CF8;   /* indigo-400 */
+  --color-primary-hover: #A5B4FC;   /* indigo-300 — lighter, reads on black */
+  --color-primary-text:  #A5B4FC;   /* brand colour when used as TEXT / icon on the dark surface */
   --color-primary-deep:  #4F46E5;   /* indigo-600 */
   --color-primary-soft:  rgba(99, 102, 241, 0.16);
   --color-accent:        #14B8A6;   /* teal-500 */
   --color-accent-soft:   rgba(20, 184, 166, 0.18);
-  --color-success:       #22C55E;
-  --color-success-soft:  rgba(34, 197, 94, 0.16);
-  --color-warn:          #F59E0B;
-  --color-warn-soft:     rgba(245, 158, 11, 0.16);
-  --color-danger:        #EF4444;
-  --color-danger-soft:   rgba(239, 68, 68, 0.16);
-  --color-focus:         #818CF8;
+  --color-success:       #34D399;
+  --color-success-soft:  rgba(52, 211, 153, 0.18);
+  --color-warn:          #FBBF24;
+  --color-warn-soft:     rgba(251, 191, 36, 0.18);
+  --color-danger:        #F87171;
+  --color-danger-soft:   rgba(248, 113, 113, 0.18);
+  --color-focus:         #A5B4FC;
 
   /* Color — gradients used in hero / chart fills / glow blobs */
   --grad-hero:           linear-gradient(135deg, #6366F1 0%, #14B8A6 100%);
@@ -50,20 +53,20 @@
   --grad-progress:       linear-gradient(90deg, #6366F1 0%, #14B8A6 100%);
 
   /* Glassmorphism primitives */
-  --glass-bg:            rgba(30, 41, 59, 0.55);
-  --glass-bg-strong:     rgba(30, 41, 59, 0.72);
-  --glass-bg-soft:       rgba(30, 41, 59, 0.32);
+  --glass-bg:            rgba(22, 22, 22, 0.72);
+  --glass-bg-strong:     rgba(14, 14, 14, 0.86);
+  --glass-bg-soft:       rgba(22, 22, 22, 0.48);
   --glass-blur:          saturate(180%) blur(20px);
   --glass-blur-strong:   saturate(180%) blur(28px);
   --glass-blur-soft:     saturate(160%) blur(12px);
-  --glass-border:        rgba(255, 255, 255, 0.10);
-  --glass-border-strong: rgba(255, 255, 255, 0.18);
+  --glass-border:        rgba(255, 255, 255, 0.13);
+  --glass-border-strong: rgba(255, 255, 255, 0.24);
 
   /* Shadows (deep + soft premium depth) */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.18);
-  --shadow-sm: 0 4px 12px rgba(2, 6, 23, 0.32);
-  --shadow-md: 0 10px 30px rgba(2, 6, 23, 0.42);
-  --shadow-lg: 0 24px 60px rgba(2, 6, 23, 0.50);
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.62);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.72);
   --shadow-glow-primary: 0 12px 36px rgba(99, 102, 241, 0.35);
   --shadow-glow-accent:  0 12px 36px rgba(20, 184, 166, 0.32);
 
@@ -113,9 +116,8 @@
   --dur-med:  250ms;
   --dur-slow: 400ms;
 
-  /* Custom cursor */
-  --cursor-dot-size: 8px;
-  --cursor-ring-size: 36px;
+  /* Cursor spotlight (decorative glow that trails the native cursor) */
+  --cursor-spotlight-color: rgba(165, 180, 252, 0.22);
 }
 
 /* ─── Light theme (kept for users who prefer it) ───────────────────────── */
@@ -135,6 +137,7 @@
   --color-text-inverse:  #FFFFFF;
 
   --color-primary:       #6366F1;
+  --color-primary-text:  #6366F1;
   --color-primary-hover: #4F46E5;
   --color-primary-deep:  #4338CA;
   --color-primary-soft:  rgba(99, 102, 241, 0.12);
@@ -172,4 +175,7 @@
   --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.14);
   --shadow-glow-primary: 0 12px 36px rgba(99, 102, 241, 0.22);
   --shadow-glow-accent:  0 12px 36px rgba(20, 184, 166, 0.20);
+
+  /* Cursor spotlight — a touch stronger on light backgrounds so it reads */
+  --cursor-spotlight-color: rgba(99, 102, 241, 0.30);
 }

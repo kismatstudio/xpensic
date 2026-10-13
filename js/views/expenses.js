@@ -3,12 +3,12 @@
 // Phase 3: Filter bar (date range, category multi-select), text search,
 //          payment-method chip on each row, sort by date+time.
 
-import { Store } from "../store.js";
-import { formatCurrency, formatDate } from "../format.js";
-import { openModal } from "../components/modal.js";
-import { confirmDialog } from "../components/confirm.js";
-import { toast } from "../components/toast.js";
-import { buildExpenseForm } from "./expense-form.js";
+import { Store } from "../store.js?v=31";
+import { formatCurrency, formatDate, symbolForSettings } from "../format.js?v=31";
+import { openModal } from "../components/modal.js?v=31";
+import { confirmDialog } from "../components/confirm.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { buildExpenseForm } from "./expense-form.js?v=31";
 import {
   compareISO,
   compareHHMM,
@@ -16,7 +16,7 @@ import {
   paymentMethodLabel,
   upiAppLabel,
   parseSearchQuery,
-} from "../util.js";
+} from "../util.js?v=31";
 
 /**
  * Renders the Expenses view into the given container.
@@ -61,7 +61,7 @@ export function renderExpenses(container, { state, onChange }) {
     <div class="filter-group filter-group--grow">
       <label class="filter-group__label" for="exp-search">Search</label>
       <input class="field__input filter-group__input" type="search" id="exp-search"
-             placeholder="Try: Food last month, >1000, January, ₹250" />
+             placeholder="Try: Food last month, >1000, January, ${symbolForSettings(settings)}250" />
     </div>
     <button class="btn btn--ghost" type="button" id="filter-clear" title="Clear all filters">Clear</button>
     <span class="muted toolbar__count" id="exp-count">0 expenses</span>
@@ -285,7 +285,7 @@ export function renderExpenses(container, { state, onChange }) {
 
 function openExpenseFormModal({ state, categories, expense, onSaved }) {
   const isEdit = Boolean(expense);
-  const form = buildExpenseForm({ categories, expense });
+  const form = buildExpenseForm({ categories, expense, settings: state.settings });
 
   openModal({
     title: isEdit ? "Edit expense" : "Add expense",

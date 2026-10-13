@@ -16,8 +16,8 @@
 // The blob also gets a keyed HMAC fingerprint so the client can detect
 // silent corruption after decryption without exposing a plaintext hash.
 
-import { aeadEncrypt, aeadDecrypt, authTag } from "./sodium.mjs";
-import { bytesToB64, b64ToBytes } from "./sodium.mjs";
+import { aeadEncrypt, aeadDecrypt, authTag } from "./sodium.mjs?v=31";
+import { bytesToB64, b64ToBytes } from "./sodium.mjs?v=31";
 
 const STATE_VERSION = 1;
 const VAULT_ALGORITHM = "aes-gcm-256";

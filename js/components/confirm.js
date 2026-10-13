@@ -1,7 +1,7 @@
 // Confirm dialog — wraps openModal with a simple yes/no API.
 // Used for destructive actions (e.g. delete expense, delete category).
 
-import { openModal } from "./modal.js";
+import { openModal } from "./modal.js?v=31";
 
 /**
  * @param {object} opts

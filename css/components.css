@@ -7,7 +7,9 @@
 
 /* ─── Buttons ─────────────────────────────────────────────────────────── */
 /* The base .btn is defined in premium.css (glass pill). Here we add
-   variants and the cursor-target highlight. */
+   variants. Buttons keep their own themed hover styling — the cursor
+   spotlight (js/cursor.js) only blooms a soft glow behind them and never
+   repaints the button itself. */
 .btn--primary {
   background: var(--grad-primary);
   color: #FFFFFF;
@@ -59,53 +61,6 @@
 }
 
 .btn--block { width: 100%; }
-
-/* Cursor-target highlight — applied by js/cursor.js when the cursor
-   hovers a real button (.btn, .icon-btn, <button>, etc.).
-
-   The pill shape MUST be preserved — we override the border-radius with
-   `var(--radius-pill)` so the highlight can never turn the button into a
-   rectangle. The text is forced to bright white and the background to
-   solid black. A soft glow + slight lift give the premium feel. */
-.is-cursor-target,
-.is-cursor-target:hover,
-.is-cursor-target:focus,
-.is-cursor-target:focus-visible {
-  background: #000000 !important;
-  background-image: none !important;
-  color: #FFFFFF !important;
-  border-color: #000000 !important;
-  border-radius: var(--radius-pill) !important;
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(255, 255, 255, 0.08) inset !important;
-  transform: scale(1.03) !important;
-  transition:
-    background 220ms var(--ease-out),
-    color 220ms var(--ease-out),
-    border-color 220ms var(--ease-out),
-    box-shadow 220ms var(--ease-out),
-    transform 220ms var(--ease-spring) !important;
-}
-:root[data-theme="light"] .is-cursor-target,
-:root[data-theme="light"] .is-cursor-target:hover,
-:root[data-theme="light"] .is-cursor-target:focus,
-:root[data-theme="light"] .is-cursor-target:focus-visible {
-  background: #0F172A !important;
-  color: #FFFFFF !important;
-  border-color: #0F172A !important;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35) !important;
-}
-
-/* Make sure SVGs / emojis inside the highlighted button flip to white too */
-.is-cursor-target svg path,
-.is-cursor-target svg circle,
-.is-cursor-target svg rect,
-.is-cursor-target svg line,
-.is-cursor-target svg polygon {
-  fill: #FFFFFF !important;
-  stroke: #FFFFFF !important;
-}
 
 /* ─── Icon button ─────────────────────────────────────────────────────── */
 .icon-btn {
@@ -203,6 +158,10 @@
               border-color var(--dur-med) var(--ease-out);
   position: relative;
   overflow: hidden;
+  /* Container query: lets .kpi__value scale its font with the card
+     width (cqw = % of the card's content-box width) so 8-figure
+     amounts never get clipped by overflow:hidden. */
+  container-type: inline-size;
 }
 .kpi::after {
   content: "";
@@ -234,9 +193,17 @@
   text-transform: uppercase;
   font-size: 21px;
   margin-top: 10px;
+  /* Reserve two lines so every KPI's value starts at the same y even
+     when one label wraps ("October 2026 total") and another doesn't
+     ("Daily average"). `lh` tracks the computed line-height, so this
+     stays correct if the font size changes. */
+  min-height: 2lh;
 }
 .kpi__value {
-  font-size: var(--text-2xl);
+  /* 34px on wide cards; scales down with the card width (cqw) so
+     long 8-figure amounts fit without clipping. 18px floor keeps
+     the number readable even in the narrowest 4-column layout. */
+  font-size: clamp(18px, 12cqw, 34px);
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -702,6 +669,16 @@
 }
 .budget-list__input { -moz-appearance: textfield; }
 
+/* The expense-form amount is typed by hand — hide the native number
+   spinner so there is no click-to-increment control (matches
+   .budget-list__input and #split-total). */
+#exp-amount::-webkit-outer-spin-button,
+#exp-amount::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+#exp-amount { -moz-appearance: textfield; appearance: textfield; }
+
 .budget-list__clear-spacer { width: 32px; display: inline-block; }
 .budget-list__bar {
   margin-top: var(--space-2);
@@ -1164,7 +1141,7 @@ kbd {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   text-decoration: none;
 }
 .budget-alert-kpi__link:hover {
@@ -1366,7 +1343,7 @@ kbd {
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -1460,6 +1437,15 @@ kbd {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--glass-border-strong);
+}
+
+/* Quick Add card: drop the backdrop-filter so Chrome renders the
+   native <select> dropdowns correctly. See the comment in dashboard.js
+   for the full bug description. The glass background + border + shadow
+   remain, so the card still reads as a card. */
+.dash-card--no-blur {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .dash-card__title {
   display: flex;
@@ -1615,7 +1601,7 @@ kbd {
   margin-top: 6px;
   border-radius: var(--radius-pill);
   background: var(--color-primary-soft);
-  color: var(--color-primary);
+  color: var(--color-primary-text);
   font-size: var(--text-xs);
   font-weight: 500;
 }
@@ -1793,6 +1779,15 @@ kbd {
   border-color: var(--color-danger);
 }
 
+/* The split total is typed by hand — hide the native number spinner so
+   there is no click-to-increment control (matches .budget-list__input). */
+#split-total::-webkit-outer-spin-button,
+#split-total::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+#split-total { -moz-appearance: textfield; appearance: textfield; }
+
 .split-form__preview {
   margin-top: var(--space-3);
   padding: var(--space-3);
@@ -1923,8 +1918,16 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 200;
-  display: grid;
-  place-items: center;
+  /* Flex + auto-margin centering (instead of grid place-items: center).
+     When the card is taller than the viewport — e.g. the vault-setup
+     wizard once the recovery phrase is revealed — grid centering pushes
+     the card's top above the scroll area, so the title and master
+     password fields become unreachable. With flex + `margin: auto` on
+     the card, the auto margins collapse to 0 on overflow and the card
+     aligns to the top, keeping every field scrollable. */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   padding: var(--space-4);
   overflow-y: auto;
 }
@@ -1932,6 +1935,7 @@ kbd {
 .login-gate__card {
   width: 100%;
   max-width: 420px;
+  margin: auto;
   background: var(--glass-bg-strong);
   -webkit-backdrop-filter: var(--glass-blur-strong);
   backdrop-filter: var(--glass-blur-strong);
@@ -2024,7 +2028,7 @@ kbd {
 }
 
 [data-theme="dark"] .login-gate__tagline {
-  color: #94A3B8;
+  color: #D4D4D8;
 }
 
 @media (max-width: 480px) {
@@ -2102,6 +2106,37 @@ kbd {
   color: #FFFFFF;
   box-shadow: var(--shadow-glow-primary);
 }
+
+/* Unlock-vault card: centred brand lockup + shield title. Everything uses
+   theme tokens, so the card, heading, field and button read in light and
+   dark. */
+.unlock-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: var(--space-5);
+  position: relative;
+  z-index: 1;
+}
+.unlock-brand .brand-mark { width: 52px; height: 49px; }
+.unlock-brand .brand-wordmark { font-size: 26px; }
+.unlock-brand .brand-tagline { font-size: 9.5px; }
+.unlock-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-strong);
+}
+.unlock-title__icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  color: var(--color-accent);
+}
+.unlock-card .field__label { color: var(--color-text); }
+.unlock-card .field__hint { color: var(--color-text-muted); }
+.unlock-card .login-gate__legal { color: var(--color-text-muted); line-height: 1.45; }
 
 .login-gate__phone-wrap {
   display: flex;
@@ -2479,6 +2514,22 @@ kbd {
   margin-bottom: var(--space-5);
   isolation: isolate;
 }
+/* Dark: a graphite-black hero (no blue wash) with a thin brand-coloured glow
+   in the corners and a hairline border so it lifts off the black page. */
+:root[data-theme="dark"] .hero-card {
+  background:
+    radial-gradient(520px 260px at 100% 0%, rgba(99, 102, 241, 0.28), transparent 65%),
+    radial-gradient(460px 240px at 0% 100%, rgba(20, 184, 166, 0.16), transparent 65%),
+    linear-gradient(135deg, #1B1B1F 0%, #0D0D0F 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65);
+}
+
+:root[data-theme="dark"] .hero-card::before {
+  background: radial-gradient(400px 200px at 0% 100%, rgba(0, 0, 0, 0.30), transparent 60%);
+}
+:root[data-theme="dark"] .hero-card::after { background: none; }
+
 .hero-card::before {
   content: "";
   position: absolute;
@@ -2678,7 +2729,7 @@ kbd {
 .insight__icon--success { background: var(--color-success-soft); color: var(--color-success); }
 .insight__icon--warn    { background: var(--color-warn-soft);    color: var(--color-warn); }
 .insight__icon--danger  { background: var(--color-danger-soft);  color: var(--color-danger); }
-.insight__icon--primary { background: var(--color-primary-soft); color: var(--color-primary); }
+.insight__icon--primary { background: var(--color-primary-soft); color: var(--color-primary-text); }
 .insight__icon--accent  { background: var(--color-accent-soft);  color: var(--color-accent); }
 
 .insight__body { flex: 1; min-width: 0; }
@@ -2851,4 +2902,61 @@ kbd {
 }
 .pw-toggle.is-active {
   color: var(--color-primary, #6366f1);
+}
+
+/* ─── Scan receipt ────────────────────────────────────────────────────── */
+.scan { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.scan__lead { margin: 0; color: var(--color-text-muted); line-height: 1.5; }
+.scan__drop {
+  border: 1.5px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  background: var(--glass-bg-soft);
+  transition: border-color var(--dur-med) var(--ease-out), background var(--dur-med) var(--ease-out);
+}
+.scan__drop.is-over { border-color: var(--color-primary); background: var(--color-primary-soft); }
+.scan__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: center; }
+.scan__btn { min-height: 46px; }
+.scan__hint { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--color-text-faint); line-height: 1.4; }
+.scan__privacy { margin: 0; font-size: var(--text-xs); color: var(--color-text-muted); }
+.scan__error {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  border: 1px solid var(--color-danger);
+  color: var(--color-text);
+  line-height: 1.45;
+}
+.scan__busy { display: flex; gap: var(--space-4); align-items: flex-start; }
+.scan__busy-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start; }
+.scan__status { font-weight: 600; color: var(--color-text); }
+.scan__bar { width: 100%; height: 8px; border-radius: var(--radius-pill); background: var(--color-surface-3); overflow: hidden; }
+.scan__bar > span { display: block; height: 100%; width: 0; background: var(--grad-progress); transition: width 200ms var(--ease-out); }
+.scan__thumb { width: 96px; height: auto; max-height: 140px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border-strong); flex: 0 0 auto; }
+.scan__thumb--sm { width: 64px; max-height: 90px; }
+.scan__summary { display: flex; gap: var(--space-3); align-items: flex-start; }
+.scan__summary-text { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-2); }
+.scan__merchant { font-weight: 700; font-size: var(--text-md); color: var(--color-text-strong); overflow-wrap: anywhere; }
+.scan__banner { padding: 8px 12px; border-radius: var(--radius-sm); font-size: var(--text-sm); line-height: 1.4; color: var(--color-text); }
+.scan__banner--ok { background: var(--color-success-soft); border: 1px solid var(--color-success); }
+.scan__banner--warn { background: var(--color-warn-soft); border: 1px solid var(--color-warn); }
+.scan__alts { font-size: var(--text-sm); color: var(--color-text-muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.scan__chip {
+  padding: 4px 10px; border-radius: var(--radius-pill); cursor: pointer;
+  border: 1px solid var(--color-border-strong); background: var(--glass-bg);
+  color: var(--color-text); font-size: var(--text-sm); font-weight: 600;
+}
+.scan__chip:hover { border-color: var(--color-primary); }
+.scan__why { margin: 0; font-size: var(--text-sm); color: var(--color-text-muted); line-height: 1.45; }
+.scan__items { font-size: var(--text-sm); color: var(--color-text-muted); }
+.scan__items summary { cursor: pointer; font-weight: 600; color: var(--color-text); }
+.scan__items ul { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.scan__items li { display: flex; justify-content: space-between; gap: var(--space-3); }
+.scan__items li span:first-child { overflow-wrap: anywhere; }
+.scan__footer { display: flex; gap: var(--space-2); justify-content: flex-end; flex-wrap: wrap; margin-top: var(--space-2); }
+@media (max-width: 480px) {
+  .scan__busy { flex-direction: column; }
+  .scan__actions .btn { width: 100%; }
+  .scan__footer .btn { flex: 1 1 auto; }
 }

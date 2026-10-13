@@ -9,15 +9,15 @@
 // The view itself is a simple form; the heavy lifting lives in the
 // keystore + unlock-gate modules.
 
-import { Crypto } from "../api.js";
-import { unwrapWithPassword, unwrapWithPhrase } from "../crypto/keystore.mjs";
-import { stringToPhrase } from "../crypto/recovery.mjs";
-import { setMasterKey } from "../crypto/unlock-gate.mjs";
-import { loadVault } from "../crypto/vault-sync.mjs";
-import { escapeHtml } from "../util.js";
-import { toast } from "../components/toast.js";
-import { enhancePasswordInputs } from "../components/pw-toggle.js";
-import { Store } from "../store.js";
+import { Crypto } from "../api.js?v=31";
+import { unwrapWithPassword, unwrapWithPhrase } from "../crypto/keystore.mjs?v=31";
+import { stringToPhrase } from "../crypto/recovery.mjs?v=31";
+import { setMasterKey } from "../crypto/unlock-gate.mjs?v=31";
+import { loadVault } from "../crypto/vault-sync.mjs?v=31";
+import { escapeHtml } from "../util.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { enhancePasswordInputs } from "../components/pw-toggle.js?v=31";
+import { Store } from "../store.js?v=31";
 
 export async function mountUnlock({ onUnlocked, profile }) {
   // Build the unlock card. The user enters their password (or
@@ -44,26 +44,25 @@ export async function mountUnlock({ onUnlocked, profile }) {
   const hasPasswordWrap = wraps.some((w) => w.wrapType === "password");
   const hasPhraseWrap   = wraps.some((w) => w.wrapType === "phrase");
 
+  // Themed with the shared login-gate styles (components.css) so the card,
+  // title, tabs, field and button all follow the light / dark tokens.
   root.innerHTML = `
-    <style>
-      .unlock-card{background:#f4f6fb;border-radius:24px;padding:32px 28px;max-width:420px;margin:auto;box-shadow:0 10px 40px rgba(0,0,0,.08);font-family:system-ui,sans-serif;color:#1a2332;}
-      .unlock-card h1{font-size:1.7rem;font-weight:800;margin:0 0 6px;letter-spacing:-.02em;}
-      .unlock-card .sub{color:#6b7280;margin:0 0 22px;font-size:.95rem;line-height:1.35;}
-      .pill-tabs{display:flex;gap:8px;background:#e8ecf1;padding:4px;border-radius:999px;margin-bottom:22px;}
-      .pill-tab{flex:1;border:none;background:transparent;padding:10px 0;border-radius:999px;font-weight:600;color:#6b7280;cursor:pointer;font-size:.95rem;transition:.2s;}
-      .pill-tab.is-active{background:#7c6cf5;color:#fff;box-shadow:0 2px 8px rgba(124,108,245,.35);}
-      .field__label{font-weight:600;font-size:.85rem;color:#374151;margin-bottom:6px;display:block;}
-      .field__input{width:100%;padding:14px 16px;border:1.5px solid #dde2e8;border-radius:14px;font-size:1rem;background:#fff;color:#111;outline:none;box-sizing:border-box;}
-      .field__hint{font-size:.82rem;color:#6b7280;margin-top:6px;}
-      .btn--primary{width:100%;padding:14px;border:none;border-radius:14px;background:#7c6cf5;color:#fff;font-weight:700;font-size:1.05rem;cursor:pointer;margin-top:14px;box-shadow:0 4px 14px rgba(124,108,245,.3);}
-      .legal{font-size:.82rem;color:#6b7280;margin-top:18px;line-height:1.35;text-align:center;}
-    </style>
-    <div class="unlock-card">
-      <h1 id="unlock-title"><span style="font-size:40px;vertical-align:middle;margin-right:2px;margin-left:20px;">🛡️</span>Unlock your VAULT</h1>
-      <p class="sub">Welcome back${profile?.name ? `, ${escapeHtml(profile.name)}` : ""}. Enter your password to decrypt your data.</p>
-      <div class="pill-tabs" role="tablist" aria-label="Unlock method">
-        <button class="pill-tab is-active" type="button" role="tab" id="unlock-tab-pw" aria-selected="true" aria-controls="unlock-panel-pw">Password</button>
-        <button class="pill-tab" type="button" role="tab" id="unlock-tab-phrase" aria-selected="false" aria-controls="unlock-panel-phrase" tabindex="-1">Recovery phrase</button>
+    <div class="login-gate__card unlock-card">
+      <div class="brand-lockup unlock-brand" aria-hidden="true">
+        <svg class="brand-mark" viewBox="0 0 320 300" focusable="false"><use href="#xp-mark"></use></svg>
+        <span class="brand-type">
+          <span class="brand-wordmark">Xpensic</span>
+          <span class="brand-tagline">Track expenses. Take control.</span>
+        </span>
+      </div>
+      <h1 class="login-gate__title unlock-title" id="unlock-title">
+        <svg class="unlock-title__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/><path d="M9.5 12l2 2 3.5-4"/></svg>
+        Unlock your vault
+      </h1>
+      <p class="login-gate__subtitle">Welcome back${profile?.name ? `, ${escapeHtml(profile.name)}` : ""}. Enter your password to decrypt your data.</p>
+      <div class="login-gate__tabs" role="tablist" aria-label="Unlock method">
+        <button class="login-gate__tab is-active" type="button" role="tab" id="unlock-tab-pw" aria-selected="true" aria-controls="unlock-panel-pw">Password</button>
+        <button class="login-gate__tab" type="button" role="tab" id="unlock-tab-phrase" aria-selected="false" aria-controls="unlock-panel-phrase" tabindex="-1">Recovery phrase</button>
       </div>
 
       <form class="login-gate__form" id="unlock-form" novalidate>

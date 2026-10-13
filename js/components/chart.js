@@ -57,7 +57,7 @@ export function renderBarChart(host, opts) {
     label.setAttribute("y", y + ROW / 2 + 4);
     label.setAttribute("class", "chart-svg__label");
     label.setAttribute("text-anchor", "end");
-    label.textContent = d.label;
+    label.textContent = d.label ?? d.name ?? "";
     svg.appendChild(label);
 
     // Track (background of the bar).

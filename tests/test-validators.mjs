@@ -50,6 +50,29 @@ check("empty error mentions 'required'", /required/i.test(validateAmount("").err
 check("negative error mentions 'greater'", /greater/i.test(validateAmount(-1).error || ""));
 check("non-number error mentions 'number'", /number/i.test(validateAmount("abc").error || ""));
 
+// ---- expense-form.js: live character guard on the Amount field -------------
+
+console.log("\n[1b] expense-form.js — live 'characters not allowed' guard");
+const expenseFormSrc = readFileSync(join(root, "js/views/expense-form.js"), "utf8");
+check("amount input has a beforeinput guard",
+  /amountGroup\.input\.addEventListener\("beforeinput"/.test(expenseFormSrc));
+check("guard rejects non-numeric characters",
+  /\[\^0-9\.,-\]/.test(expenseFormSrc));
+check("guard shows the exact error message",
+  /Characters are not allowed in amount field/.test(expenseFormSrc));
+check("guard calls setFieldError for the amount field",
+  /setFieldError\("amount",\s*"Characters are not allowed in amount field"\)/.test(expenseFormSrc));
+check("amount input blocks the mouse wheel (no scroll-to-change)",
+  /amountGroup\.input\.addEventListener\("wheel"[\s\S]{0,120}preventDefault\(\)/.test(expenseFormSrc));
+check("wheel handler is non-passive so preventDefault works",
+  /addEventListener\("wheel"[\s\S]{0,120}passive:\s*false/.test(expenseFormSrc));
+check("submit reports 'characters not allowed' when invalid chars were typed",
+  /amountHadInvalidChars[\s\S]{0,200}Characters are not allowed in amount field/.test(expenseFormSrc));
+check("invalid-chars flag is tracked on beforeinput",
+  /amountHadInvalidChars\s*=\s*true/.test(expenseFormSrc));
+check("invalid-chars flag resets on valid input",
+  /amountHadInvalidChars\s*=\s*false/.test(expenseFormSrc));
+
 // ---- validateDate ----------------------------------------------------------
 
 console.log("\n[2] validateDate — accepts YYYY-MM-DD, rejects the rest");

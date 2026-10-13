@@ -1,16 +1,16 @@
-import { Crypto } from "../api.js";
-import { encryptVault, decryptVault, isEmptyEnvelope } from "./vault.mjs";
+import { Crypto } from "../api.js?v=31";
+import { encryptVault, decryptVault, isEmptyEnvelope } from "./vault.mjs?v=31";
 import {
   getMasterKey,
   getState as getUnlockState,
   lock as lockVault,
-} from "./unlock-gate.mjs";
+} from "./unlock-gate.mjs?v=31";
 import {
   getEncryptedVault,
   saveEncryptedVault,
   clearEncryptedVault,
-} from "./vault-cache.mjs";
-import { Store } from "../store.js";
+} from "./vault-cache.mjs?v=31";
+import { Store } from "../store.js?v=31";
 
 let currentRevision = 0;
 

@@ -8,16 +8,16 @@
 // have no way to recover their data if they ever need to sign in
 // from a new device.
 
-import { Crypto } from "../api.js";
-import { newMasterKey } from "../crypto/sodium.mjs";
-import { wrapWithPassword, wrapWithPhrase } from "../crypto/keystore.mjs";
-import { generatePhrase } from "../crypto/recovery.mjs";
-import { setMasterKey } from "../crypto/unlock-gate.mjs";
-import { saveVault } from "../crypto/vault-sync.mjs";
-import { Store } from "../store.js";
-import { escapeHtml } from "../util.js";
-import { toast } from "../components/toast.js";
-import { enhancePasswordInputs } from "../components/pw-toggle.js";
+import { Crypto } from "../api.js?v=31";
+import { newMasterKey } from "../crypto/sodium.mjs?v=31";
+import { wrapWithPassword, wrapWithPhrase } from "../crypto/keystore.mjs?v=31";
+import { generatePhrase } from "../crypto/recovery.mjs?v=31";
+import { setMasterKey } from "../crypto/unlock-gate.mjs?v=31";
+import { saveVault } from "../crypto/vault-sync.mjs?v=31";
+import { Store } from "../store.js?v=31";
+import { escapeHtml } from "../util.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { enhancePasswordInputs } from "../components/pw-toggle.js?v=31";
 
 export async function mountVaultSetup({ onComplete, profile }) {
   const root = document.createElement("div");
@@ -28,7 +28,7 @@ export async function mountVaultSetup({ onComplete, profile }) {
 
   root.innerHTML = `
     <div class="login-gate__card">
-      <h1 class="login-gate__title" id="setup-title">Set up your vault</h1>
+      <h1 class="login-gate__title" id="setup-title">Setup your vault</h1>
       <p class="login-gate__subtitle">
         Your data is end-to-end encrypted. Pick a master password — you'll need it
         to unlock on any new device.

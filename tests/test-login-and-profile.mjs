@@ -60,7 +60,7 @@ check("login displays the API base URL in the legal note", /apiBase/.test(login)
 check("login calls Auth.signup on sign-up",            /Auth\.signup\(/.test(login));
 check("login calls Auth.signin on sign-in",            /Auth\.signin\(/.test(login));
 check("login calls Auth.verifyOtp before signing in via OTP", /Auth\.verifyOtp\(/.test(login));
-check("login submits with credentials: include via the api.js wrapper", /import.*from\s+"\.\.\/api\.js"/.test(login));
+check("login submits with credentials: include via the api.js wrapper", /import.*from\s+"\.\.\/api\.js(?:\?[^"]*)?"/.test(login));
 
 console.log("\n[3] login.js: error states from the server surface inline");
 check("login shows signin password errors inline",       /fields\.signinPwErr/.test(login));

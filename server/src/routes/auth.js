@@ -14,7 +14,9 @@ import { sendOtpEmail } from "../email.js";
 import {
   createUser,
   findUserByEmail,
+  findUserByIdentifier,
   findUserById,
+  findPhoneOwner,
   updateUser,
   putRefreshToken,
   getRefreshToken,
@@ -23,8 +25,9 @@ import {
 import {
   validateIdentifier,
   validatePassword,
+  validatePhone,
 } from "../validate.js";
-import { attachUser } from "../middleware/auth.js";
+import { attachUser, authRequired } from "../middleware/auth.js";
 
 export const authRouter = Router();
 
@@ -159,6 +162,10 @@ authRouter.post("/signup", async (req, res) => {
   if (await findUserByEmail(emailKey)) {
     return res.status(409).json({ ok: false, error: "An account with this email/phone already exists." });
   }
+  // A mobile number that another account saved in its profile is taken too.
+  if (id.kind === "phone" && (await findPhoneOwner(id.value))) {
+    return res.status(409).json({ ok: false, error: "An account with this email/phone already exists." });
+  }
 
   const userId = newId("user");
   const passwordHash = bcrypt.hashSync(pw, 10);
@@ -171,6 +178,29 @@ authRouter.post("/signup", async (req, res) => {
   });
 
   await issueTokens(res, { userId, email: user.email });
+  return res.json({ ok: true, user: publicUser(user) });
+});
+
+// PUT /api/auth/phone
+// Body: { phone } — saves (or, with "", clears) the signed-in account's
+// profile mobile number. A number already used by another account is
+// rejected so it can't be claimed twice.
+authRouter.put("/phone", authRequired, async (req, res) => {
+  const raw = String(req.body?.phone ?? "").trim();
+  let phone = "";
+  if (raw) {
+    phone = validatePhone(raw);
+    if (!phone) {
+      return res.status(400).json({ ok: false, error: "Enter a 10-digit Indian mobile number." });
+    }
+    if (await findPhoneOwner(phone, req.user.userId)) {
+      return res.status(409).json({ ok: false, error: "This mobile number is already used by another Xpensic account." });
+    }
+  }
+  const user = await updateUser(req.user.userId, { phone });
+  if (!user) {
+    return res.status(401).json({ ok: false, error: "Account no longer exists." });
+  }
   return res.json({ ok: true, user: publicUser(user) });
 });
 
@@ -187,7 +217,7 @@ authRouter.post("/signin", async (req, res) => {
   }
 
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  const user = await findUserByEmail(emailKey);
+  const user = await findUserByIdentifier(id);
   if (!user) {
     return res.status(401).json({
       ok: false,
@@ -222,7 +252,7 @@ authRouter.post("/send-otp", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Enter a valid email or 10-digit mobile number." });
   }
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  if (!(await findUserByEmail(emailKey))) {
+  if (!(await findUserByIdentifier(id))) {
     return res.status(401).json({ ok: false, error: "This email/phone is not registered. Please sign up first." });
   }
   const code = String(Math.floor(1000 + Math.random() * 9000));
@@ -297,7 +327,7 @@ authRouter.post("/verify-otp", async (req, res) => {
     return res.status(400).json({ ok: false, error: "OTP does not match. Please try again." });
   }
   otpStore.delete(emailKey);
-  const user = await findUserByEmail(emailKey);
+  const user = await findUserByIdentifier(id);
   if (!user) {
     return res.status(401).json({ ok: false, error: "This email/phone is not registered. Please sign up first." });
   }
@@ -390,7 +420,7 @@ authRouter.post("/forgot/send-otp", async (req, res) => {
     return res.status(400).json({ ok: false, error: "Enter a valid email or 10-digit mobile number." });
   }
   const emailKey = id.kind === "email" ? id.value : `phone:${id.value}`;
-  const user = await findUserByEmail(emailKey);
+  const user = await findUserByIdentifier(id);
   // Always return a generic-looking message to avoid leaking which
   // identifiers are registered. The client behaves the same way either
   // way; in demo mode (no API key) we still return the code so dev
@@ -493,7 +523,7 @@ authRouter.post("/forgot/reset", async (req, res) => {
   if (!pw) {
     return res.status(400).json({ ok: false, error: "Password must be at least 8 characters." });
   }
-  const user = await findUserByEmail(emailKey);
+  const user = await findUserByIdentifier(id);
   if (!user) {
     return res.status(404).json({ ok: false, error: "Account no longer exists." });
   }

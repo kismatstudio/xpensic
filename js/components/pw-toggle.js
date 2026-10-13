@@ -2,7 +2,7 @@
 // password input so users can verify what they typed.
 //
 // Usage:
-//   import { enhancePasswordInputs } from "../components/pw-toggle.js";
+//   import { enhancePasswordInputs } from "../components/pw-toggle.js?v=31";
 //   enhancePasswordInputs(root);           // enhance every password
 //                                          // input inside `root`
 //

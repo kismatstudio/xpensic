@@ -1,0 +1,17 @@
+# Cloudflare Pages response headers.
+#
+# The app is plain ES modules with a fixed ?v= cache-buster, so a browser that
+# keeps an old copy of any module while others update ends up running mixed
+# versions (random freezes / blank screens after a deploy). "no-cache" means
+# "always revalidate": the browser still reuses its copy when nothing changed
+# (cheap 304), but can never run a stale one.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/js/*
+  Cache-Control: no-cache
+/css/*
+  Cache-Control: no-cache
+/*
+  X-Content-Type-Options: nosniff

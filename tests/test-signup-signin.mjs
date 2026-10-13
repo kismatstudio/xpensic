@@ -109,9 +109,9 @@ check("api.js exports Crypto.deleteVault", /deleteVault:/.test(apiSrc));
 
 console.log("\n[4] login.js uses the server-backed Auth client");
 check("login.js imports from ../api.js",
-  /from\s+"\.\.\/api\.js"/.test(login));
+  /from\s+"\.\.\/api\.js(?:\?[^"]*)?"/.test(login));
 check("login.js imports Auth (not the local Store helpers)",
-  /import\s*\{[^}]*\bAuth\b[^}]*\}\s*from\s+"\.\.\/api\.js"/.test(login));
+  /import\s*\{[^}]*\bAuth\b[^}]*\}\s*from\s+"\.\.\/api\.js(?:\?[^"]*)?"/.test(login));
 check("login.js does NOT call Store.findProfileByPhone",
   !/Store\.findProfileByPhone/.test(login));
 check("login.js does NOT call Store.registerProfile",

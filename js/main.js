@@ -9,47 +9,49 @@
 //   • Every unlocked state mutation is encrypted in the browser and
 //     uploaded as one vault envelope. The local cache is encrypted too.
 
-import { Store } from "./store.js";
-import { formatCurrency } from "./format.js";
-import { initTheme, cycleTheme, getThemePref, setTheme } from "./theme.js";
-import { initCursor } from "./cursor.js";
-import { renderExpenses as renderExpensesView } from "./views/expenses.js";
-import { renderDashboard as renderDashboardView } from "./views/dashboard.js";
-import { renderCategories as renderCategoriesView } from "./views/categories.js";
-import { renderBudgets as renderBudgetsView } from "./views/budgets.js";
-import { renderProfile as renderProfileView } from "./views/profile.js";
-import { renderSplits as renderSplitsView } from "./views/splits.js";
-import { mountLogin } from "./views/login.js";
-import { mountUnlock } from "./views/unlock.js";
-import { mountVaultSetup } from "./views/vault-setup.js";
-import { exportFullState, parseFullState, mergeState, downloadAsFile, readFileAsText } from "./backup.js";
-import { expensesToCSV, csvToExpenses } from "./csv.js";
-import { confirmDialog } from "./components/confirm.js";
-import { mountKeyboardShortcuts } from "./keyboard.js";
-import { openModal } from "./components/modal.js";
-import { toast } from "./components/toast.js";
-import { buildExpenseForm } from "./views/expense-form.js";
+import { Store } from "./store.js?v=31";
+import { formatCurrency, symbolForSettings } from "./format.js?v=31";
+import { initTheme, cycleTheme, getThemePref, setTheme, enterGateTheme, enterUserTheme } from "./theme.js?v=31";
+import { initCursor } from "./cursor.js?v=31";
+import { renderExpenses as renderExpensesView } from "./views/expenses.js?v=31";
+import { renderDashboard as renderDashboardView } from "./views/dashboard.js?v=31";
+import { renderCategories as renderCategoriesView } from "./views/categories.js?v=31";
+import { renderBudgets as renderBudgetsView } from "./views/budgets.js?v=31";
+import { renderProfile as renderProfileView } from "./views/profile.js?v=31";
+import { renderSplits as renderSplitsView } from "./views/splits.js?v=31";
+import { mountLogin } from "./views/login.js?v=31";
+import { openScanReceipt } from "./views/scan-receipt.js?v=31";
+import { mountUnlock } from "./views/unlock.js?v=31";
+import { mountVaultSetup } from "./views/vault-setup.js?v=31";
+import { exportFullState, parseFullState, mergeState, downloadAsFile, readFileAsText } from "./backup.js?v=31";
+import { expensesToCSV, csvToExpenses } from "./csv.js?v=31";
+import { confirmDialog } from "./components/confirm.js?v=31";
+import { mountKeyboardShortcuts } from "./keyboard.js?v=31";
+import { openModal } from "./components/modal.js?v=31";
+import { toast } from "./components/toast.js?v=31";
+import { buildExpenseForm } from "./views/expense-form.js?v=31";
 import {
   todayISO, escapeHtml,
   startOfMonth, monthKey, formatMonth,
   formatIndianPhone, generateAvatarDataUrl,
-} from "./util.js";
-import { Auth, Crypto, apiBase, ApiError } from "./api.js";
-import { mountFeedbackButton } from "./feedback.js";
-import { KismatFooter } from "./components/kismat-footer.js?v=13";
-import { getDeviceKey, isAvailable as deviceKeyAvailable, clearDeviceKey as clearLocalDeviceKey, needsReauth, touchLastUnlockAt } from "./crypto/device-key.mjs";
-import { unwrapWithDeviceKey, wrapWithDeviceKey, newDeviceKey, getDeviceId } from "./crypto/keystore.mjs";
+} from "./util.js?v=31";
+import { Auth, Crypto, apiBase, ApiError } from "./api.js?v=31";
+import { mountFeedbackButton } from "./feedback.js?v=31";
+import { KismatFooter } from "./components/kismat-footer.js?v=31";
+import { getDeviceKey, isAvailable as deviceKeyAvailable, clearDeviceKey as clearLocalDeviceKey, needsReauth, touchLastUnlockAt } from "./crypto/device-key.mjs?v=31";
+import { unwrapWithDeviceKey, wrapWithDeviceKey, newDeviceKey, getDeviceId } from "./crypto/keystore.mjs?v=31";
 import {
   setMasterKey,
   getMasterKey as readMasterKey,
   getState as getUnlockState,
   lock as lockVault,
-} from "./crypto/unlock-gate.mjs";
+} from "./crypto/unlock-gate.mjs?v=31";
+import { withTimeout } from "./crypto/idb.mjs?v=31";
 import {
   loadVault as loadEncryptedVault,
   saveVault as saveEncryptedVault,
   clearVaultCache,
-} from "./crypto/vault-sync.mjs";
+} from "./crypto/vault-sync.mjs?v=31";
 
 // ---- Route table -----------------------------------------------------------
 
@@ -106,15 +108,51 @@ async function flushVaultSync() {
   syncInFlight = true;
   syncPending = false;
   try {
-    await saveEncryptedVault(session.state);
+    // Bounded: a request or IndexedDB call that never settles must not keep
+    // "in flight" set forever (that silently stopped all later saves).
+    await withTimeout(saveEncryptedVault(session.state), SYNC_TIMEOUT_MS, "Vault sync");
     setServerOnline(true);
+    syncRetryDelay = 5000;
   } catch (err) {
     setServerOnline(false, err);
+    scheduleSyncRetry();
     throw err;
   } finally {
     syncInFlight = false;
     if (syncPending && !syncTimer) syncToServer();
   }
+}
+
+const SYNC_TIMEOUT_MS = 30000;
+let syncRetryTimer = null;
+let syncRetryDelay = 5000;
+
+// A failed upload used to stay failed until the user happened to save again.
+// Retry with a growing delay (5s → 60s) so the encrypted vault catches up on
+// its own once the network / server is back.
+function scheduleSyncRetry() {
+  if (syncRetryTimer) return;
+  syncRetryTimer = setTimeout(() => {
+    syncRetryTimer = null;
+    syncPending = true;
+    syncToServer();
+  }, syncRetryDelay);
+  syncRetryDelay = Math.min(syncRetryDelay * 2, 60000);
+}
+
+if (typeof window !== "undefined") {
+  // Back online, or the tab is visible again after a stall: sync right away.
+  const resyncIfNeeded = () => {
+    if (!session.state?.profile?.userId || !getUnlockState().isUnlocked) return;
+    if (session.serverOnline === false) { syncPending = true; syncToServer(); }
+  };
+  window.addEventListener("online", resyncIfNeeded);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") resyncIfNeeded();
+    // Leaving / refreshing the page: push pending changes now, not after the
+    // 500 ms debounce.
+    else if (syncPending && getUnlockState().isUnlocked) flushVaultSync().catch(() => {});
+  });
 }
 
 function setServerOnline(online, err) {
@@ -164,23 +202,15 @@ function renderNavProfile() {
   // wasted and the app identity is reinforced on every navigation.
   host.innerHTML = `
     <div class="app-nav__brand">
-      <!-- Drawer brand: the full SVG lockup (wordmark included) with a
-           light/dark swap. Anchored at the very top of the drawer with
-           minimal padding so no space is wasted above the logo. -->
-      <img
-        class="app-nav__brand-mark app-nav__brand-mark--light"
-        src="assets/brand/xpensic-light.png"
-        alt="Xpensic"
-        width="155"
-        height="48"
-      />
-      <img
-        class="app-nav__brand-mark app-nav__brand-mark--dark"
-        src="assets/brand/xpensic-dark.png"
-        alt="Xpensic"
-        width="255"
-        height="75"
-      />
+      <!-- Drawer brand: same vector lockup as the header (shared
+           #xp-mark sprite in index.html), shown larger. -->
+      <div class="brand-lockup brand-lockup--drawer">
+        <svg class="brand-mark" viewBox="0 0 320 300" aria-hidden="true" focusable="false"><use href="#xp-mark"></use></svg>
+        <span class="brand-type">
+          <span class="brand-wordmark">Xpensic</span>
+          <span class="brand-tagline">Track expenses. Take control.</span>
+        </span>
+      </div>
     </div>
     <div class="app-nav__profile-card">
       <a class="app-nav__profile-link" href="#/profile" data-route="profile">
@@ -347,7 +377,17 @@ function mountNavActions() {
       } else if (action === "create-budget") {
         window.location.hash = "#/budgets";
       } else if (action === "scan-receipt") {
-        toast("Coming Soon", "info", 3400, { center: true });
+        openScanReceipt({
+          state: session.state,
+          onManual: openAddExpenseModal,
+          onSave: (value) => {
+            Store.addExpense(session.state, value);
+            Store.save(session.state);
+            syncToServer();
+            toast("Expense added from receipt", "success");
+            render();
+          },
+        });
       }
     });
   });
@@ -520,20 +560,21 @@ function renderSettings(container) {
     <div class="field">
       <label class="field__label" for="set-symbol">Symbol</label>
       <input class="field__input" id="set-symbol" type="text" maxlength="3" />
+      <div class="field__hint">Follows the currency code — updated automatically.</div>
     </div>
     <div class="field">
       <label class="field__label" for="set-pos">Symbol position</label>
       <select class="field__select" id="set-pos">
-        <option value="before">Before amount (₹1,234)</option>
-        <option value="after">After amount (1,234 ₹)</option>
+        <option value="before">Before amount</option>
+        <option value="after">After amount</option>
       </select>
     </div>
     <div class="field">
       <label class="field__label" for="set-date">Date format</label>
       <select class="field__select" id="set-date">
-        <option value="YYYY-MM-DD">YYYY-MM-DD (2026-07-10)</option>
-        <option value="DD/MM/YYYY">DD/MM/YYYY (10/07/2026)</option>
-        <option value="MM/DD/YYYY">MM/DD/YYYY (07/10/2026)</option>
+        <option value="YYYY-MM-DD">YYYY-MM-DD (2026-10-07)</option>
+        <option value="DD/MM/YYYY">DD/MM/YYYY (07/10/2026)</option>
+        <option value="MM/DD/YYYY">MM/DD/YYYY (10/07/2026)</option>
       </select>
     </div>
     <div style="margin-top:var(--space-3); display:flex; gap:var(--space-2); align-items:center;">
@@ -640,7 +681,12 @@ function renderSettings(container) {
   const $preview = currencyCard.querySelector("#set-preview");
 
   $currency.value = s.currency || "INR";
-  $symbol.value = s.currencySymbol || "₹";
+  // The symbol always mirrors the selected code, so a stored value that
+  // drifted out of sync (e.g. USD code with a stale "₹") self-heals here.
+  $symbol.value = symbolForSettings({
+    currency: $currency.value,
+    currencySymbol: s.currencySymbol,
+  });
   $pos.value = s.currencyPosition || "before";
   $date.value = s.dateFormat || "YYYY-MM-DD";
 
@@ -654,6 +700,16 @@ function renderSettings(container) {
     $preview.textContent = formatCurrency(1234.5, settings);
   };
   updatePreview();
+
+  // Changing the code swaps the symbol immediately so the field never
+  // shows the previous currency's glyph. `render()` at the end of
+  // persistSettings re-runs this whole block against the saved state.
+  $currency.addEventListener("change", () => {
+    $symbol.value = symbolForSettings({
+      currency: $currency.value,
+      currencySymbol: $symbol.value,
+    });
+  });
 
   const persistSettings = () => {
     Store.updateSettings(state, {
@@ -859,6 +915,8 @@ function openExpenseForm({ state, expense }) {
   const form = buildExpenseForm({
     categories: state.categories,
     expense: expense || null,
+    settings: state.settings,
+    expenses: state.expenses,
   });
   openModal({
     title: expense ? "Edit expense" : "Add expense",
@@ -985,8 +1043,13 @@ function mountAppShell() {
 
 function bootLoginGate() {
   document.body.classList.add("app-locked");
+  // Sign-in / sign-up always show in the System theme.
+  enterGateTheme();
   mountLogin({
     onComplete: ({ user, justSignedUp }) => {
+      // Signed in: this account's own theme from here on.
+      enterUserTheme(user.userId);
+      updateThemeButton();
       // Adopt the server's user identity locally. We don't touch
       // any of the user data yet — the E2EE unlock flow is the
       // source of truth, and it loads the encrypted vault next.
@@ -1016,6 +1079,8 @@ function bootLoginGate() {
  */
 async function bootUnlockOrSetup({ user, justSignedUp }) {
   let wraps = [];
+  let wrapsFetched = false;
+  for (let attempt = 0; attempt < 3 && !wrapsFetched; attempt++) {
   try {
     // Crypto.getMasterKey normalises the server response into an
     // array of { wrapType, envelope, createdAt } objects. We check
@@ -1024,11 +1089,22 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
     // extraction.
     const res = await Crypto.getMasterKey();
     wraps = Array.isArray(res) ? res : [];
+    wrapsFetched = true;
   } catch (err) {
-    // The crypto endpoint may not be live (older server, network
-    // glitch). Fall through with empty wraps so we either set up
-    // a fresh vault or surface a clear error.
     console.warn("[boot] master-key fetch failed:", err?.message || err);
+    // An older server without the endpoint (404) really has no wraps.
+    if (err instanceof ApiError && err.status === 404) { wrapsFetched = true; break; }
+    if (attempt < 2) await sleep(700 * (attempt + 1));
+  }
+  }
+
+  // A network / server hiccup must NOT look like "no vault yet": that sent
+  // existing users into the vault-setup wizard. Offer a retry instead.
+  if (!wrapsFetched) {
+    mountConnectionProblem({
+      onRetry: () => bootUnlockOrSetup({ user, justSignedUp }),
+    });
+    return;
   }
 
   if (wraps.length === 0) {
@@ -1060,6 +1136,36 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
   });
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Shown when the server can't be reached while deciding between "unlock" and
+ * "set up a vault". Never route to vault setup on a failed request.
+ */
+function mountConnectionProblem({ onRetry }) {
+  document.body.classList.add("app-locked");
+  const root = document.createElement("div");
+  root.className = "login-gate";
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-modal", "true");
+  root.setAttribute("aria-labelledby", "conn-title");
+  root.innerHTML = `
+    <div class="login-gate__card">
+      <h1 class="login-gate__title" id="conn-title">Can't reach the server</h1>
+      <p class="login-gate__subtitle">
+        We couldn't load your account details. Your data is safe — check your connection and try again.
+      </p>
+      <div class="login-gate__form">
+        <button class="btn btn--primary btn--block" type="button" id="conn-retry">Try again</button>
+        <button class="btn btn--block" type="button" id="conn-signout">Sign out</button>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.querySelector("#conn-retry").addEventListener("click", () => { root.remove(); onRetry(); });
+  root.querySelector("#conn-signout").addEventListener("click", () => { root.remove(); signOut(); });
+  root.querySelector("#conn-retry").focus();
+}
+
 /**
  * Attempt to silently unlock the vault using this browser's
  * IndexedDB-bound device wrap. Returns true on success (caller
@@ -1072,12 +1178,18 @@ async function bootUnlockOrSetup({ user, justSignedUp }) {
  */
 async function tryDeviceAutoUnlock({ user, wraps }) {
   try {
-    if (!(await deviceKeyAvailable())) return false;
+    // A transient IndexedDB hiccup must not look like "this device has no
+    // key" (that bounced users to the unlock screen on a plain refresh).
+    let available = await deviceKeyAvailable();
+    if (!available) { await sleep(500); available = await deviceKeyAvailable(); }
+    if (!available) return false;
     // Periodic re-auth: if 7 days have passed since the last
     // password-based unlock on this device, skip auto-unlock and
     // fall through to the manual unlock screen. This ensures a
     // stolen device can't silently access the vault indefinitely.
-    if (await needsReauth(user.userId)) {
+    let reauth = await needsReauth(user.userId);
+    if (reauth) { await sleep(300); reauth = await needsReauth(user.userId); } // re-read: guards a failed read
+    if (reauth) {
       console.info("[boot] periodic re-auth required — skipping auto-unlock");
       return false;
     }
@@ -1086,15 +1198,34 @@ async function tryDeviceAutoUnlock({ user, wraps }) {
       (w) => w.wrapType === "device" && w.envelope && w.envelope.deviceId === deviceId,
     );
     if (!myDeviceWrap) return false;
-    const deviceKey = await getDeviceKey(user.userId);
+    let deviceKey = await getDeviceKey(user.userId);
+    if (!deviceKey) { await sleep(300); deviceKey = await getDeviceKey(user.userId); }
     if (!deviceKey) return false;
     let mk;
     try { mk = await unwrapWithDeviceKey(myDeviceWrap.envelope, deviceKey); }
     catch { return false; }
     setMasterKey(mk);
+    // Load the vault with a few retries: one slow / failed request must not
+    // end in the manual unlock screen.
     let state = null;
-    try { state = await loadEncryptedVault({ userId: user.userId }); } catch { state = null; }
-    if (!state) return false;
+    let loadError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        state = await loadEncryptedVault({ userId: user.userId });
+        loadError = null;
+        break;
+      } catch (err) {
+        loadError = err;
+        await sleep(600 * (attempt + 1));
+      }
+    }
+    if (loadError) {
+      lockVault();
+      return false;
+    }
+    // No vault anywhere yet (the page was refreshed before the first save
+    // reached the server): start empty instead of looping on the unlock screen.
+    if (!state) state = { ...Store.reset() };
     // The vault owns private profile fields. Only bind its state to the
     // authenticated account id supplied by the auth session.
     state.profile = {
@@ -1133,7 +1264,7 @@ async function tryDeviceAutoUnlock({ user, wraps }) {
 async function ensureDeviceWrap({ user, mk, existingWraps }) {
   try {
     if (!(await deviceKeyAvailable())) return;
-    const { setDeviceKey } = await import("./crypto/device-key.mjs");
+    const { setDeviceKey } = await import("./crypto/device-key.mjs?v=31");
     const deviceId = getDeviceId();
     const hasMine = (existingWraps || []).some(
       (w) => w.wrapType === "device" && w.envelope && w.envelope.deviceId === deviceId,
@@ -1188,6 +1319,9 @@ async function afterUnlock(state, { justSignedUp = false, freshVault = false, pa
   if (!Array.isArray(session.state.loginDays)) session.state.loginDays = [];
   Store.recordLoginDay(session.state, todayISO());
   Store.save(session.state);
+  // The vault is open: apply the theme the user saved in their settings.
+  if (session.state.settings?.theme) setTheme(session.state.settings.theme);
+  updateThemeButton();
   if (typeof window !== "undefined") {
     window.__xpensicCurrentUserId = session.state.profile?.userId || "";
     window.__xpensicProfileName = session.state.profile?.name || "";
@@ -1208,15 +1342,24 @@ async function afterUnlock(state, { justSignedUp = false, freshVault = false, pa
     const userId = session.state.profile?.userId;
     const mk = readMasterKeySafe();
     if (userId && mk) {
-      const wraps = await Crypto.getMasterKey();
-      await ensureDeviceWrap({ user: { userId }, mk, existingWraps: wraps });
+      await withTimeout((async () => {
+        const wraps = await Crypto.getMasterKey();
+        await ensureDeviceWrap({ user: { userId }, mk, existingWraps: wraps });
+      })(), 8000, "Device setup");
     }
   } catch (err) {
+    // Includes the timeout: the app opens anyway; silent unlock just
+    // becomes available on a later visit.
     console.warn("[boot] ensureDeviceWrap failed:", err?.message || err);
   }
   if (passwordUnlock) {
     if (signedInUserId) touchLastUnlockAt(signedInUserId).catch(() => {});
   }
+  // Accounts whose profile number predates server-side phone tracking:
+  // register it now (best effort; a number another account already owns is
+  // simply not claimed).
+  const profilePhone = session.state.profile?.phone || "";
+  if (/^\d{10}$/.test(profilePhone)) Auth.setPhone(profilePhone).catch(() => {});
   syncToServer();
   mountAppShell();
 }
@@ -1231,8 +1374,8 @@ async function init() {
   // Boot the theme immediately so the page doesn't flash white.
   initTheme();
 
-  // Boot the custom cursor (fine-pointer devices only). Adds a small
-  // black dot + smooth trailing ring that scales on hoverable elements.
+  // Boot the cursor spotlight (fine-pointer devices only). The native
+  // cursor stays visible; a soft glow trails behind it as ambient light.
   initCursor();
 
   // Session-expired watchdog. When the API layer detects that both the
@@ -1289,6 +1432,7 @@ async function init() {
       if (typeof window !== "undefined") {
         window.__xpensicCurrentUserId = me.user.userId || "";
       }
+      enterUserTheme(me.user.userId);
       bootUnlockOrSetup({ user: { ...me.user, name: me.user.displayName || "" }, justSignedUp: false });
       return;
     }
@@ -1305,7 +1449,6 @@ async function init() {
     }
   }
 
-  if (session.state.settings?.theme) setTheme(session.state.settings.theme);
   updateThemeButton();
   bootLoginGate();
 }

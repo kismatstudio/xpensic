@@ -1,7 +1,7 @@
 // In-memory source of truth for app data. Encrypted vault persistence is
 // handled by js/crypto/vault-sync.mjs; this module never stores user state.
 
-import { newId } from "./ids.js";
+import { newId } from "./ids.js?v=31";
 
 const STORAGE_KEY = "expense-tracker:v1";
 const SCHEMA_VERSION = 6;

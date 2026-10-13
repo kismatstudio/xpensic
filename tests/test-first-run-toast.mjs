@@ -61,5 +61,16 @@ const initFn = main.match(/async\s+function\s+init\(\)\s*\{[\s\S]*?\n\}/)?.[0] |
 check("init() does not call toast() unconditionally for welcome",
   !/toast\(\s*"Welcome/.test(initFn));
 
+console.log("\n[5] Toasts are centered (never hidden behind the feedback FAB)");
+const layoutCss = read("css/layout.css");
+const indexHtml = read("index.html");
+check(".toast-region is centered in the viewport",
+  /\.toast-region\s*\{[\s\S]*?top:\s*50%[\s\S]*?left:\s*50%[\s\S]*?translate\(-50%,\s*-50%\)/.test(layoutCss));
+check(".toast-region sits above the feedback FAB (z-index 950 > 900)",
+  /\.toast-region\s*\{[\s\S]*?z-index:\s*950/.test(layoutCss));
+check("toast region lives outside .app so the transform applies",
+  /<\/div>\s*\n\s*<!-- Toast region lives OUTSIDE \.app/.test(indexHtml) ||
+  /toast-region[\s\S]{0,200}id="toast-region"[\s\S]{0,100}<\/div>\s*<\/body>/.test(indexHtml));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

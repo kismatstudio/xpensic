@@ -11,9 +11,9 @@
 // isn't forced through the single-action openModal() helper. Toasts come
 // from the shared toast component.
 
-import { Feedback } from "./api.js";
-import { toast } from "./components/toast.js";
-import { escapeHtml } from "./util.js";
+import { Feedback } from "./api.js?v=31";
+import { toast } from "./components/toast.js?v=31";
+import { escapeHtml } from "./util.js?v=31";
 
 const APP_VERSION = "1.0.0";
 

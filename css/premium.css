@@ -34,6 +34,15 @@ body {
   background-attachment: fixed;
 }
 
+/* Dark: near-black page with only a whisper of colour in the corners. */
+:root[data-theme="dark"] body {
+  background:
+    radial-gradient(900px 600px at 8% -10%, rgba(99, 102, 241, 0.10), transparent 60%),
+    radial-gradient(720px 520px at 100% 12%, rgba(20, 184, 166, 0.06), transparent 65%),
+    radial-gradient(960px 700px at 50% 110%, rgba(99, 102, 241, 0.06), transparent 70%),
+    var(--color-bg);
+}
+
 :root[data-theme="light"] body {
   background:
     radial-gradient(900px 600px at 8% -10%, rgba(99, 102, 241, 0.12), transparent 60%),
@@ -267,22 +276,47 @@ h4 { font-size: var(--text-md); }
 
 .btn--block { width: 100%; }
 
-/* ─── Custom cursor ───────────────────────────────────────────────────── */
-/* The custom cursor is opt-in: we only apply it to devices with a
-   fine pointer (mouse / trackpad) AND when the user hasn't toggled it off
-   via the [data-cursor="off"] attribute on <html>. The cursor element
-   itself lives in the DOM as #cursor-dot / #cursor-ring and is
-   positioned via transform in JS (see js/cursor.js). */
-@media (hover: hover) and (pointer: fine) {
-  html[data-cursor="on"],
-  html[data-cursor="on"] * {
-    cursor: none !important;
-  }
-  html[data-cursor="on"] input,
-  html[data-cursor="on"] textarea,
-  html[data-cursor="on"] select {
-    cursor: text !important;
-  }
+/* ─── Cursor spotlight ────────────────────────────────────────────────── */
+/* The native OS cursor is always visible. A soft radial glow trails
+   behind it as ambient light. The element (#cursor-spotlight) is created
+   and positioned by js/cursor.js; it is decorative only (pointer-events:
+   none) and never repaints the elements underneath. It sits above normal
+   content but below modals/overlays so it can't wash out dialog text. */
+.cursor-spotlight {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 400;
+  opacity: 0;
+  transition: opacity 320ms var(--ease-out);
+  will-change: transform;
+}
+.cursor-spotlight.is-visible { opacity: 1; }
+.cursor-spotlight::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(1);
+  background: radial-gradient(
+    circle,
+    var(--cursor-spotlight-color) 0%,
+    transparent 62%
+  );
+  transition: transform 280ms var(--ease-out);
+}
+/* Bloom a little larger over interactive controls as hover feedback. */
+.cursor-spotlight.is-expanded::before {
+  transform: translate(-50%, -50%) scale(1.22);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor-spotlight { display: none; }
 }
 
 /* ─── FAB (Floating Action Button) ────────────────────────────────────── */
@@ -382,6 +416,25 @@ h4 { font-size: var(--text-md); }
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 0 0 var(--color-primary-soft); }
   50%      { box-shadow: 0 0 0 8px transparent; }
+}
+
+/* ─── Dark theme: hover states ────────────────────────────────────────────
+   The base hover (black fill) vanishes on a black page, so in dark the
+   hover lifts to a lighter surface instead. */
+:root[data-theme="dark"] .btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.38);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme="dark"] .btn--primary:hover {
+  background: linear-gradient(135deg, #818CF8 0%, #6366F1 100%);
+  border-color: transparent;
+  box-shadow: var(--shadow-glow-primary);
+}
+:root[data-theme="dark"] .btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.20);
 }
 
 /* ─── Print: tone down the glass for paper ───────────────────────────── */

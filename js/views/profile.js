@@ -11,17 +11,18 @@
 //       - A grid of built-in "hero" silhouettes from util.js is offered as
 //         an alternative when the user doesn't have a personal photo handy.
 //   • "Remove" clears the custom picture (falls back to the generated
-//     initials avatar).
+//     initials avatar, or a hyphen placeholder when no name is set).
 
 import {
   formatIndianPhone, generateAvatarDataUrl,
   validateIndianPhone, escapeHtml, processProfilePicture,
   listHeroAvatars, generateHeroAvatarDataUrl,
-} from "../util.js";
-import { Store } from "../store.js";
-import { openModal } from "../components/modal.js";
-import { toast } from "../components/toast.js";
-import { confirmDialog } from "../components/confirm.js";
+} from "../util.js?v=31";
+import { Store } from "../store.js?v=31";
+import { openModal } from "../components/modal.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { confirmDialog } from "../components/confirm.js?v=31";
+import { Auth } from "../api.js?v=31";
 
 /**
  * Renders the full Profile view. Re-renders in-place after any change so
@@ -130,13 +131,13 @@ export function renderProfile(container, ctx) {
           <div class="prof-avatar-field__buttons">
             <label class="btn prof-avatar-field__upload" for="prof-avatar-input">
               Choose photo…
-              <input type="file" id="prof-avatar-input" accept="image/*" hidden />
+              <input type="file" id="prof-avatar-input" accept="image/jpeg,image/png,image/webp" hidden />
             </label>
             <button class="btn" type="button" id="prof-avatar-remove">Remove photo</button>
           </div>
         </div>
         <div class="field__hint muted" id="prof-avatar-hint">
-          Pick one from your device, or choose a built-in character below.
+          Pick one from your device, or choose a built-in character below. Supported: JPG, PNG, WebP.
         </div>
         <div class="field__error" id="prof-avatar-error" hidden></div>
       </div>
@@ -183,7 +184,7 @@ export function renderProfile(container, ctx) {
         { label: "Cancel", value: false, kind: "default" },
         { label: "Save", value: true, kind: "primary" },
       ],
-      onAction: (v) => {
+      onAction: async (v) => {
         if (!v) return true;
         const name = body.querySelector("#prof-name").value.trim();
         const rawPhone = body.querySelector("#prof-phone").value.trim();
@@ -195,6 +196,20 @@ export function renderProfile(container, ctx) {
         let hasError = false;
         if (!phoneResult.ok) { $phoneErr.textContent = phoneResult.error; $phoneErr.hidden = false; hasError = true; }
         if (hasError) return false;
+
+        // Register a changed mobile number with the server so it belongs to
+        // this account only (and can't be used to sign up another one).
+        if (phoneResult.value !== (p.phone || "")) {
+          try {
+            await Auth.setPhone(phoneResult.value);
+          } catch (err) {
+            $phoneErr.textContent = err?.status === 409
+              ? err.message
+              : "Couldn't verify this mobile number right now. Check your connection and try again.";
+            $phoneErr.hidden = false;
+            return false;
+          }
+        }
 
         // Resolve the avatar to persist (priority order):
         //   1. `pendingAvatar` — user picked a new photo or hero this session
@@ -236,7 +251,8 @@ export function renderProfile(container, ctx) {
     function generatedFallback() {
       // Used only when the user removes their photo AND hasn't picked a
       // hero — the avatar should still look intentional, so we regenerate
-      // the initials avatar from the current name.
+      // the initials avatar from the current name (a hyphen placeholder
+      // when the name field is empty).
       return generateAvatarDataUrl({
         name: body.querySelector("#prof-name").value,
         phone: body.querySelector("#prof-phone").value,
@@ -258,7 +274,13 @@ export function renderProfile(container, ctx) {
       $hint.textContent = "Processing…";
       const result = await processProfilePicture(file);
       if (!result.ok) {
-        setError(result.error);
+        // Unsupported formats get a pop-up toast; other failures
+        // (oversize, decode error) stay as an inline field message.
+        if (result.error === "This file format is not supported") {
+          toast(result.error, "error");
+        } else {
+          setError(result.error);
+        }
         $hint.textContent = "Pick one from your device, or choose a built-in character below.";
         return;
       }
@@ -275,7 +297,9 @@ export function renderProfile(container, ctx) {
       setError("");
       setPreview(generatedFallback());
       markHeroSelected("");
-      $hint.textContent = "Photo removed. We'll show your initials instead.";
+      $hint.textContent = body.querySelector("#prof-name").value.trim()
+        ? "Photo removed. We'll show your initials instead."
+        : "Photo removed. We'll show a placeholder until you add a name.";
     });
 
     // Hero-picker — click a cell to swap the preview to that silhouette.

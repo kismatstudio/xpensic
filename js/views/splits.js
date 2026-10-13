@@ -11,18 +11,18 @@
 // the recipient still has to type the numbers in on their own device,
 // but the code gives them a stable identifier to refer to.
 
-import { Store } from "../store.js";
-import { openModal } from "../components/modal.js";
-import { toast } from "../components/toast.js";
-import { escapeHtml } from "../util.js";
-import { formatDate, formatCurrency } from "../format.js";
+import { Store } from "../store.js?v=31";
+import { openModal } from "../components/modal.js?v=31";
+import { toast } from "../components/toast.js?v=31";
+import { escapeHtml } from "../util.js?v=31";
+import { formatDate, formatCurrency } from "../format.js?v=31";
 import {
   addSplit,
   deleteSplit,
   computeSplit,
   sumPaid,
   generateFriendCode,
-} from "../splitter.js";
+} from "../splitter.js?v=31";
 
 export function renderSplits(container, { state, refresh }) {
   const wrap = document.createElement("div");
@@ -126,7 +126,9 @@ function openNewSplitModal({ state, onSaved }) {
     </div>
     <div class="field">
       <label class="field__label" for="split-total">Total amount</label>
-      <input class="field__input" id="split-total" type="number" min="0" step="0.01"
+      <!-- Type-only: the spinner is hidden in CSS and step="any" disables
+           arrow-key stepping, so the total can only be entered manually. -->
+      <input class="field__input" id="split-total" type="number" min="0" step="any"
              inputmode="decimal" placeholder="0" required />
       <div class="field__error" id="split-total-err" hidden></div>
     </div>
@@ -350,7 +352,7 @@ async function deleteSplitWithConfirm({ state, id, refresh, onChanged }) {
   const s = (state.splits || []).find((x) => x.id === id);
   if (!s) return;
   // Reuse the existing confirmDialog component.
-  const { confirmDialog } = await import("../components/confirm.js");
+  const { confirmDialog } = await import("../components/confirm.js?v=31");
   const ok = await confirmDialog({
     title: "Delete this split?",
     message: `“${s.title || "Untitled"}” will be removed from your history. This can't be undone.`,

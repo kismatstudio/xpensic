@@ -31,6 +31,8 @@
 // the version forces onupgradeneeded to fire on next open, which
 // creates the missing store. Future schema changes should bump
 // this again.
+import { createIdb } from "./idb.mjs?v=31";
+
 const DB_NAME = "xpensic";
 const DB_VERSION = 2;
 const STORE = "device_keys";
@@ -62,56 +64,19 @@ export async function needsReauth(userId) {
   return (Date.now() - last) > REAUTH_INTERVAL_MS;
 }
 
-let dbPromise = null;
-
-function openDb() {
-  if (typeof indexedDB === "undefined") return Promise.resolve(null);
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve) => {
-    let req;
-    try {
-      req = indexedDB.open(DB_NAME, DB_VERSION);
-    } catch {
-      resolve(null);
-      return;
+// Defensive IndexedDB access (timeouts, no cached failures, reopen on close)
+// — see idb.mjs for why.
+const idb = createIdb({
+  name: DB_NAME,
+  version: DB_VERSION,
+  store: STORE,
+  upgrade: (db) => {
+    if (!db.objectStoreNames.contains(STORE)) {
+      db.createObjectStore(STORE, { keyPath: "userId" });
     }
-    req.onupgradeneeded = () => {
-      try {
-        if (!req.result.objectStoreNames.contains(STORE)) {
-          req.result.createObjectStore(STORE, { keyPath: "userId" });
-        }
-      } catch { /* ignore */ }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => resolve(null);
-    req.onblocked = () => resolve(null);
-  });
-  return dbPromise;
-}
-
-async function withStore(mode, fn) {
-  const db = await openDb();
-  if (!db) return null;
-  return new Promise((resolve) => {
-    let tx;
-    try { tx = db.transaction(STORE, mode); }
-    catch { resolve(null); return; }
-    let store;
-    try { store = tx.objectStore(STORE); }
-    catch { resolve(null); return; }
-    let result = null;
-    try {
-      const r = fn(store);
-      r.onsuccess = () => { result = r.result; };
-      r.onerror = () => { result = null; };
-      tx.oncomplete = () => resolve(result);
-      tx.onabort = () => resolve(result);
-      tx.onerror = () => resolve(result);
-    } catch {
-      resolve(null);
-    }
-  });
-}
+  },
+});
+const withStore = idb.withStore;
 
 /** Read the device key for a given userId (or null if not stored). */
 export async function getDeviceKey(userId) {
@@ -190,6 +155,5 @@ export function newDeviceKey() {
 
 /** True when IndexedDB-backed persistence is usable. */
 export async function isAvailable() {
-  const db = await openDb();
-  return !!db;
+  return idb.isOpenable();
 }

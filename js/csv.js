@@ -11,8 +11,8 @@
 // The writer always quotes fields that contain any of: , " \n \r.
 // The parser detects that on read, so hand-edited CSVs work too.
 
-import { validateAmount } from "./validators.js";
-import { paymentMethodLabel, upiAppLabel } from "./util.js";
+import { validateAmount } from "./validators.js?v=31";
+import { paymentMethodLabel, upiAppLabel } from "./util.js?v=31";
 
 /** Column order used for both export and import. Keep these in sync. */
 export const CSV_COLUMNS = [
